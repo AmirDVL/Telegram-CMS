@@ -25,6 +25,7 @@ dependencies = [
   "aiohttp>=3.9.0",
   "slowapi>=0.1.9",
   "structlog>=24.1.0",
+  "prometheus-client>=0.20.0",
   "tenacity>=8.2.3",
   "python-multipart>=0.0.9",
 ]

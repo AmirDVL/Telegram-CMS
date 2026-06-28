@@ -83,6 +83,28 @@ channel, rotating the userbot session, rotating secrets, and backup/restore.
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational procedures, backup/restore, failure handling |
 | [`docs/api/`](docs/api/) | Full REST API reference (auth, queue, tags, templates, channels, admins, audit) |
 
+## Observability
+
+The API exposes a **Prometheus `/metrics`** endpoint (scraped at `api:8000/metrics`)
+covering HTTP request latency/count and **ARQ queue depth** for both the `worker`
+and `bot` queues. A ready-to-run stack ships in `docker-compose.yml`:
+
+- **prometheus** — scrapes the API every 15s (config in `observability/prometheus.yml`).
+- **grafana** — exposed on host port `3001` with a provisioned Prometheus
+  datasource and an overview dashboard (`observability/grafana/dashboards/`).
+  Log in with `admin` / `GRAFANA_ADMIN_PASSWORD` (default `admin`).
+
+> Cross-process coordination is already **Postgres + ARQ-on-Redis** (a dedicated
+> broker + task-queue framework); the queue-depth metric makes that brokering
+> observable rather than adding a second, competing queue system.
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `ruff` (lint) and `pytest` on
+every push and pull request. Tests mock the Telegram-publishing boundary (ARQ
+enqueue) and exercise the deduplication logic in `shared/dedupe.py` — no
+Postgres/Redis required.
+
 ## Linking Telegram accounts for bot inline buttons
 
 After first login, editors who need to approve/reject posts via the Telegram

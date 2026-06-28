@@ -81,3 +81,18 @@ async def enqueue_post_draft(post_id: int) -> Job | None:
 
 async def enqueue_prune_dedupe() -> Job | None:
     return await enqueue_job(JOB_PRUNE_DEDUPE, queue=QUEUE_WORKER)
+
+
+async def queued_job_count(queue: str) -> int:
+    """Number of jobs waiting in an ARQ queue (``ZCARD`` of its sorted set).
+
+    ARQ stores each queue's pending + delayed jobs in a sorted set keyed by the
+    queue name, so this is the count of jobs not yet picked up by a worker.
+    Used by the API ``/metrics`` endpoint to expose broker depth. Returns 0 if
+    Redis is unreachable — observability must never break the request path.
+    """
+    try:
+        redis = await _get_pool()
+        return int(await redis.zcard(queue))
+    except Exception:
+        return 0

@@ -174,6 +174,38 @@ services:
       - web
       - api
 
+  # Prometheus: scrapes the API /metrics endpoint (HTTP latency + ARQ queue depth).
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Grafana: provisioned Prometheus datasource + overview dashboard.
+  # Reachable on the host at http://<host>:3001 (admin / GRAFANA_ADMIN_PASSWORD).
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:
   redisdata:
@@ -182,3 +214,5 @@ volumes:
   sessiondata:
   caddydata:
   caddyconfig:
+  promdata:
+  grafanadata:

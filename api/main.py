@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from api.auth import router as auth_router
 from api.limiter import limiter
+from api.metrics import MetricsMiddleware, metrics_response
 from api.routers import (
     admins_router,
     audit_router,
@@ -65,6 +66,9 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+    # Prometheus instrumentation: request latency/count + ARQ queue-depth gauge.
+    app.add_middleware(MetricsMiddleware)
+
     app.include_router(auth_router)
     app.include_router(tags_router)
     app.include_router(templates_router)
@@ -76,6 +80,10 @@ def create_app() -> FastAPI:
     @app.get("/healthz", response_model=HealthOut, tags=["health"])
     async def healthz() -> HealthOut:
         return HealthOut(service="api")
+
+    @app.get("/metrics", include_in_schema=False, tags=["health"])
+    async def metrics() -> Response:
+        return await metrics_response()
 
     return app
 
