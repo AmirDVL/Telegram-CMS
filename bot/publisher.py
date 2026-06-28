@@ -36,12 +36,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from bot.cards import CAPTION_LIMIT, build_draft_payload
-from bot.client import get_bot
+from bot.client import get_bot, get_bot_for_tenant
 from shared.config import get_settings
 from shared.db import SessionLocal
 from shared.enums import EventAction, PostState
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, PublishedDedupe, SourceChannel
+from shared.tenant import get_tenant_for_channel
 
 log = get_logger("bot.publish")
 
@@ -257,12 +258,23 @@ async def _publish_core(ctx: dict, post_id: int) -> str:
 
         channel = await session.get(SourceChannel, post.source_channel_id)
         media_refs = list(post.raw_media_refs or [])
-        normalized_text = post.normalized_text or post.raw_text or ""
+        normalized_text = post.ai_transformed_text or post.normalized_text or post.raw_text or ""
         dedupe_hash = post.dedupe_hash
+        tenant_id = post.tenant_id
 
     if channel is None:
         log.error("channel-missing", post_id=post_id)
         return "no_channel"
+
+    # Resolve tenant-specific settings (destination channel, bot token).
+    dest_channel_id = settings.destination_channel_id
+    bot = get_bot()
+    async with SessionLocal() as session:
+        tenant = await get_tenant_for_channel(session, post.source_channel_id) if tenant_id else None
+    if tenant is not None:
+        if tenant.destination_channel_id:
+            dest_channel_id = tenant.destination_channel_id
+        bot = get_bot_for_tenant(tenant.id, tenant.bot_token)
 
     # Pre-send dedupe re-check: a concurrent publish of identical content may
     # have already won (the lookback row now exists). Skip instead of double-posting.
@@ -289,13 +301,13 @@ async def _publish_core(ctx: dict, post_id: int) -> str:
             await asyncio.sleep(settings.publish_spacing_seconds)
             try:
                 message_id = await _send_post(
-                    bot, settings.destination_channel_id, normalized_text, media_refs
+                    bot, dest_channel_id, normalized_text, media_refs
                 )
             except TelegramRetryAfter as e:
                 log.warning("retry-after", seconds=e.retry_after)
                 await asyncio.sleep(e.retry_after + 1)
                 message_id = await _send_post(
-                    bot, settings.destination_channel_id, normalized_text, media_refs
+                    bot, dest_channel_id, normalized_text, media_refs
                 )
     except Exception as exc:
         send_error = exc

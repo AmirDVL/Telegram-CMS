@@ -3,10 +3,12 @@
 1. Load the post (idempotent: skip if already terminal).
 2. Render the channel's template with raw text + source label + tags
    (per-channel defaults for `auto` channels; empty for `queue` channels).
-3. Compute `dedupe_hash`; if it exists in `published_dedupe` within the
+3. Run AI transformation if enabled on the channel (translate/summarize/retone/custom).
+4. Apply watermark/branding if configured.
+5. Compute `dedupe_hash`; if it exists in `published_dedupe` within the
    lookback window, mark the post rejected/duplicate.
-4. Write `normalized_text` + `tag_ids` + `dedupe_hash` + append `post_events`.
-5. Route: `auto` → enqueue `publish`; `queue` → enqueue `post_draft` (the bot
+6. Write `normalized_text` + `tag_ids` + `dedupe_hash` + append `post_events`.
+7. Route: `auto` → enqueue `publish`; `queue` → enqueue `post_draft` (the bot
    posts the draft card to the editor supergroup).
 """
 
@@ -19,11 +21,12 @@ from sqlalchemy import select
 from shared.config import get_settings
 from shared.db import SessionLocal
 from shared.dedupe import compute_dedupe_hash
-from shared.enums import EventAction, Policy, PostState
+from shared.enums import AIMode, EventAction, Policy, PostState
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, PublishedDedupe, SourceChannel, Template
 from shared.normalize import DEFAULT_TEMPLATE_BODY, normalize_text
 from shared.tasks import enqueue_post_draft, enqueue_publish
+from shared.transform import AITransformError, apply_watermark, transform_text
 
 log = get_logger("worker.normalize")
 
@@ -46,6 +49,14 @@ def decide_route(policy: Policy, is_duplicate: bool) -> str:
     if is_duplicate:
         return "duplicate"
     return "publish" if policy == Policy.auto else "draft"
+
+
+def _should_ai_transform(channel: SourceChannel) -> bool:
+    """Check whether AI transformation should run for this channel."""
+    settings = get_settings()
+    if not settings.ai_enabled:
+        return False
+    return channel.ai_enabled and channel.ai_mode != AIMode.off
 
 
 async def normalize(ctx: dict, post_id: int) -> str:
@@ -79,12 +90,63 @@ async def normalize(ctx: dict, post_id: int) -> str:
             source_label=source_label,
             tag_ids=tag_ids,
         )
+
+        # ── AI Transformation (toggle-controlled) ────────────────────────
+        final_text = normalized
+        if _should_ai_transform(channel):
+            try:
+                result = await transform_text(
+                    normalized,
+                    mode=channel.ai_mode,
+                    target_language=channel.ai_target_language,
+                    tone_prompt=channel.ai_tone_prompt,
+                    custom_system_prompt=channel.ai_custom_system_prompt,
+                )
+                final_text = result.text
+                post.ai_transformed_text = result.text
+                session.add(
+                    PostEvent(
+                        post_id=post.id,
+                        action=EventAction.ai_transformed,
+                        payload={
+                            "model": result.model,
+                            "mode": channel.ai_mode.value,
+                            "prompt_tokens": result.prompt_tokens,
+                            "completion_tokens": result.completion_tokens,
+                            "latency_ms": result.latency_ms,
+                        },
+                    )
+                )
+                log.info(
+                    "ai-transformed",
+                    post_id=post_id,
+                    mode=channel.ai_mode.value,
+                    latency_ms=result.latency_ms,
+                )
+            except (AITransformError, Exception) as exc:
+                log.warning("ai-transform-failed", post_id=post_id, error=str(exc))
+                session.add(
+                    PostEvent(
+                        post_id=post.id,
+                        action=EventAction.ai_failed,
+                        payload={"error": str(exc)[:500]},
+                    )
+                )
+                # Fall back to un-transformed text — the post still flows through.
+
+        # ── Watermark / branding (no LLM, always runs if configured) ─────
+        final_text = apply_watermark(
+            final_text,
+            watermark_text=channel.watermark_text if channel.watermark_enabled else None,
+            strip_source_tags=channel.strip_source_tags,
+        )
+
         # Hash raw_text (not the rendered template) so that changing a template
         # does not invalidate the entire dedupe history for content that was
         # already published under a different template.
         dedupe_hash = compute_dedupe_hash(post.raw_text, post.raw_media_refs)
 
-        post.normalized_text = normalized
+        post.normalized_text = final_text
         post.tag_ids = tag_ids
         post.dedupe_hash = dedupe_hash
         # Canonical list of media file paths to (re-)publish, drawn from the

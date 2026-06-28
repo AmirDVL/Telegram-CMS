@@ -9,11 +9,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import require_role
+from api.deps import get_tenant_id, require_role
 from api.schemas import TagCreate, TagOut, TagUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin, Post, Tag
+from shared.tenant import scope_query, stamp_tenant
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
@@ -29,8 +30,10 @@ def _slugify(value: str) -> str:
 async def list_tags(
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> list[Tag]:
-    result = await session.execute(select(Tag).order_by(Tag.label))
+    stmt = scope_query(select(Tag).order_by(Tag.label), Tag, tenant_id)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -39,8 +42,10 @@ async def create_tag(
     payload: TagCreate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Tag:
     tag = Tag(slug=_slugify(payload.slug), label=payload.label, color=payload.color)
+    stamp_tenant(tag, tenant_id)
     session.add(tag)
     try:
         await session.commit()

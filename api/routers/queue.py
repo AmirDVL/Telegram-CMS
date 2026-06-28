@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_current_admin
+from api.deps import get_current_admin, get_tenant_id
 from api.schemas import (
     Paginated,
     PostDecision,
@@ -25,6 +25,7 @@ from shared.db import get_session
 from shared.enums import EventAction, PostState
 from shared.models import Admin, Post, PostEvent
 from shared.tasks import enqueue_publish
+from shared.tenant import scope_query
 
 router = APIRouter(prefix="/queue", tags=["queue"], dependencies=[Depends(get_current_admin)])
 
@@ -53,12 +54,15 @@ async def list_queue(
     limit: int = Query(default=50, le=200),
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Paginated:
     stmt = select(Post)
     count_stmt = select(func.count(Post.id))
     if state:
         stmt = stmt.where(Post.state.in_(state))
         count_stmt = count_stmt.where(Post.state.in_(state))
+    stmt = scope_query(stmt, Post, tenant_id)
+    count_stmt = scope_query(count_stmt, Post, tenant_id)
     total = int((await session.scalar(count_stmt)) or 0)
     result = await session.execute(
         stmt.order_by(Post.received_at.desc()).limit(limit).offset(offset)

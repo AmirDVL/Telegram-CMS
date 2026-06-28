@@ -1,4 +1,10 @@
-import type { TokenOut } from "./types";
+import type {
+  TokenOut,
+  AISettings,
+  AITestRequest,
+  AITestResponse,
+  Tenant,
+} from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
@@ -139,4 +145,63 @@ export async function logout(): Promise<void> {
     // Best-effort — clear local state regardless.
   }
   clearTokens();
+}
+
+// ── AI Settings ─────────────────────────────────────────────────────────────
+
+export async function getAISettings(channelId: number): Promise<AISettings> {
+  return apiFetch<AISettings>(`/source-channels/${channelId}/ai`);
+}
+
+export async function updateAISettings(
+  channelId: number,
+  data: Partial<AISettings>,
+): Promise<AISettings> {
+  return apiFetch<AISettings>(`/source-channels/${channelId}/ai`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testAITransform(
+  channelId: number,
+  data: AITestRequest,
+): Promise<AITestResponse> {
+  return apiFetch<AITestResponse>(`/source-channels/${channelId}/ai/test`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// ── Tenants ─────────────────────────────────────────────────────────────────
+
+export async function listTenants(): Promise<Tenant[]> {
+  return apiFetch<Tenant[]>("/tenants");
+}
+
+export async function getTenant(tenantId: number): Promise<Tenant> {
+  return apiFetch<Tenant>(`/tenants/${tenantId}`);
+}
+
+export async function createTenant(
+  data: Partial<Tenant>,
+): Promise<Tenant> {
+  return apiFetch<Tenant>("/tenants", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateTenant(
+  tenantId: number,
+  data: Partial<Tenant>,
+): Promise<Tenant> {
+  return apiFetch<Tenant>(`/tenants/${tenantId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteTenant(tenantId: number): Promise<void> {
+  return apiFetch<void>(`/tenants/${tenantId}`, { method: "DELETE" });
 }

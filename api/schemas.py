@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.enums import EventAction, Policy, PostState, Role
+from shared.enums import AIMode, EventAction, Policy, PostState, Role
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ class AdminOut(BaseModel):
     username: str
     role: Role
     tg_user_id: int | None = None
+    tenant_id: int | None = None
     created_at: datetime
     disabled_at: datetime | None = None
 
@@ -41,6 +42,7 @@ class AdminCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     role: Role = Role.editor
     tg_user_id: int | None = None
+    tenant_id: int | None = None
 
 
 class AdminUpdate(BaseModel):
@@ -49,6 +51,7 @@ class AdminUpdate(BaseModel):
     disabled: bool | None = None
     # Set to the admin's Telegram user id to allow bot inline-button access.
     tg_user_id: int | None = None
+    tenant_id: int | None = None
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
@@ -91,6 +94,47 @@ class TemplateUpdate(BaseModel):
     body: str | None = None
 
 
+# ── AI Settings ──────────────────────────────────────────────────────────────
+class AISettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    ai_enabled: bool = False
+    ai_mode: AIMode = AIMode.off
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool = False
+    watermark_text: str | None = None
+    strip_source_tags: bool = False
+
+
+class AISettingsUpdate(BaseModel):
+    ai_enabled: bool | None = None
+    ai_mode: AIMode | None = None
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool | None = None
+    watermark_text: str | None = None
+    strip_source_tags: bool | None = None
+
+
+class AITestRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    mode: AIMode = AIMode.translate
+    target_language: str | None = None
+    tone_prompt: str | None = None
+    custom_system_prompt: str | None = None
+
+
+class AITestResponse(BaseModel):
+    original: str
+    transformed: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latency_ms: int = 0
+
+
 # ── Source channels ───────────────────────────────────────────────────────────
 class SourceChannelOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -104,6 +148,15 @@ class SourceChannelOut(BaseModel):
     normalization_template_id: int | None = None
     max_media_size_bytes: int
     source_label: str | None = None
+    # AI settings
+    ai_enabled: bool = False
+    ai_mode: AIMode = AIMode.off
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool = False
+    watermark_text: str | None = None
+    strip_source_tags: bool = False
     created_at: datetime
 
 
@@ -117,6 +170,15 @@ class SourceChannelCreate(BaseModel):
     normalization_template_id: int | None = None
     max_media_size_bytes: int | None = None
     source_label: str | None = None
+    # AI settings (optional on create)
+    ai_enabled: bool = False
+    ai_mode: AIMode = AIMode.off
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool = False
+    watermark_text: str | None = None
+    strip_source_tags: bool = False
 
 
 class SourceChannelUpdate(BaseModel):
@@ -128,6 +190,15 @@ class SourceChannelUpdate(BaseModel):
     normalization_template_id: int | None = None
     max_media_size_bytes: int | None = None
     source_label: str | None = None
+    # AI settings
+    ai_enabled: bool | None = None
+    ai_mode: AIMode | None = None
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool | None = None
+    watermark_text: str | None = None
+    strip_source_tags: bool | None = None
 
 
 # ── Posts / draft queue ──────────────────────────────────────────────────────
@@ -141,6 +212,7 @@ class PostOut(BaseModel):
     received_at: datetime
     state: PostState
     normalized_text: str | None = None
+    ai_transformed_text: str | None = None
     media_paths: list[Any] = Field(default_factory=list)
     tag_ids: list[int] = Field(default_factory=list)
     scheduled_for: datetime | None = None
@@ -188,3 +260,56 @@ class Paginated(BaseModel):
 class HealthOut(BaseModel):
     status: str = "ok"
     service: str
+
+
+# ── Tenants (multi-tenancy) ──────────────────────────────────────────────────
+class TenantOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    slug: str
+    name: str
+    bot_token: str | None = None
+    destination_channel_id: int | None = None
+    editor_group_id: int | None = None
+    ai_enabled: bool = False
+    ai_mode: AIMode = AIMode.off
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool = False
+    watermark_text: str | None = None
+    strip_source_tags: bool = False
+    created_at: datetime
+    disabled_at: datetime | None = None
+
+
+class TenantCreate(BaseModel):
+    slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=256)
+    bot_token: str | None = None
+    destination_channel_id: int | None = None
+    editor_group_id: int | None = None
+    ai_enabled: bool = False
+    ai_mode: AIMode = AIMode.off
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool = False
+    watermark_text: str | None = None
+    strip_source_tags: bool = False
+
+
+class TenantUpdate(BaseModel):
+    name: str | None = None
+    bot_token: str | None = None
+    destination_channel_id: int | None = None
+    editor_group_id: int | None = None
+    ai_enabled: bool | None = None
+    ai_mode: AIMode | None = None
+    ai_target_language: str | None = None
+    ai_tone_prompt: str | None = None
+    ai_custom_system_prompt: str | None = None
+    watermark_enabled: bool | None = None
+    watermark_text: str | None = None
+    strip_source_tags: bool | None = None
+    disabled: bool | None = None

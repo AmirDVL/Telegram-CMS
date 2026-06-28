@@ -26,6 +26,16 @@ class PostState(str, enum.Enum):
     publish_failed = "publish_failed"
 
 
+class AIMode(str, enum.Enum):
+    """AI transformation mode — controls how the LLM processes post text."""
+
+    off = "off"  # No AI processing
+    translate = "translate"  # Translate to a target language
+    summarize = "summarize"  # Condense into bullet points
+    retone = "retone"  # Rewrite with a target tone/style
+    custom = "custom"  # Use a free-form system prompt
+
+
 class EventAction(str, enum.Enum):
     ingested = "ingested"
     edited = "edited"
@@ -37,6 +47,8 @@ class EventAction(str, enum.Enum):
     duplicate = "duplicate"
     media_omitted = "media_omitted"
     draft_posted = "draft_posted"
+    ai_transformed = "ai_transformed"
+    ai_failed = "ai_failed"
 
 
 class MediaType(str, enum.Enum):

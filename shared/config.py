@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     worker_health_port: int = 8083
     userbot_health_port: int = 8084
 
+    # ── Feature flags ────────────────────────────────────────────────────
+    multi_tenancy_enabled: bool = False
+
+    # ── AI Transformation ────────────────────────────────────────────────
+    ai_enabled: bool = False
+    ai_provider_url: str = "https://api.openai.com/v1"
+    ai_api_key: str = ""
+    ai_model: str = "gpt-4o-mini"
+    ai_max_tokens: int = 2048
+    ai_timeout_seconds: int = 30
+
     @property
     def cors_origin_list(self) -> list[str]:
         if self.cors_origins.strip() == "*":

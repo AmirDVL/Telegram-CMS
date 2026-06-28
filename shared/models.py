@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from shared.enums import EventAction, Policy, PostState, Role
+from shared.enums import AIMode, EventAction, Policy, PostState, Role
 
 
 def _default_media_size() -> int:
@@ -32,6 +32,46 @@ def _default_media_size() -> int:
 
 class Base(DeclarativeBase):
     pass
+
+
+# ── Multi-tenancy ────────────────────────────────────────────────────────────
+
+
+class Tenant(Base):
+    """A tenant represents an isolated workspace in multi-tenant mode.
+
+    When ``MULTI_TENANCY_ENABLED=false`` (the default), this table exists but is
+    unused — all ``tenant_id`` FKs stay ``NULL`` and queries are unscoped.
+    """
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    # Per-tenant Telegram bot credentials (override the global ones).
+    bot_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    destination_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    editor_group_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Tenant-level AI defaults (channels can override).
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    ai_mode: Mapped[AIMode] = mapped_column(
+        Enum(AIMode, name="ai_mode", values_callable=lambda e: [m.value for m in e]),
+        default=AIMode.off,
+        server_default="off",
+    )
+    ai_target_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ai_tone_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_custom_system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Watermark/branding defaults.
+    watermark_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    watermark_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    strip_source_tags: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ── Core models ──────────────────────────────────────────────────────────────
 
 
 class Admin(Base):
@@ -50,6 +90,9 @@ class Admin(Base):
     tg_user_id: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True, unique=True, index=True
     )
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -61,6 +104,9 @@ class Tag(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     label: Mapped[str] = mapped_column(String(64))
     color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -70,6 +116,9 @@ class Template(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
     body: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -96,6 +145,24 @@ class SourceChannel(Base):
         BigInteger, default=_default_media_size, server_default="2147483648"
     )
     source_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
+    # ── AI Transformation (per-channel override) ─────────────────────────
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    ai_mode: Mapped[AIMode] = mapped_column(
+        Enum(AIMode, name="ai_mode", values_callable=lambda e: [m.value for m in e],
+             create_constraint=False),
+        default=AIMode.off,
+        server_default="off",
+    )
+    ai_target_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ai_tone_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_custom_system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── Watermark/branding ───────────────────────────────────────────────
+    watermark_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    watermark_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    strip_source_tags: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     template: Mapped[Template | None] = relationship("Template", lazy="selectin")
@@ -138,6 +205,7 @@ class Post(Base):
         index=True,
     )
     normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_transformed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     media_paths: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     tag_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), default=list, server_default="{}")
     scheduled_for: Mapped[datetime | None] = mapped_column(
@@ -154,6 +222,9 @@ class Post(Base):
     )
     handled_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("admins.id"), nullable=True
+    )
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -175,6 +246,9 @@ class PostEvent(Base):
         Enum(EventAction, name="event_action", values_callable=lambda e: [m.value for m in e])
     )
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -182,6 +256,9 @@ class PublishedDedupe(Base):
     __tablename__ = "published_dedupe"
 
     dedupe_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -197,4 +274,5 @@ __all__ = [
     "SourceChannelTag",
     "Tag",
     "Template",
+    "Tenant",
 ]

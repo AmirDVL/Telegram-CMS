@@ -15,11 +15,13 @@ from api.limiter import limiter
 from api.metrics import MetricsMiddleware, metrics_response
 from api.routers import (
     admins_router,
+    ai_settings_router,
     audit_router,
     queue_router,
     source_channels_router,
     tags_router,
     templates_router,
+    tenants_router,
 )
 from api.schemas import HealthOut
 from shared.config import get_settings
@@ -73,9 +75,11 @@ def create_app() -> FastAPI:
     app.include_router(tags_router)
     app.include_router(templates_router)
     app.include_router(source_channels_router)
+    app.include_router(ai_settings_router)
     app.include_router(admins_router)
     app.include_router(queue_router)
     app.include_router(audit_router)
+    app.include_router(tenants_router)
 
     @app.get("/healthz", response_model=HealthOut, tags=["health"])
     async def healthz() -> HealthOut:

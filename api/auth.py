@@ -46,8 +46,12 @@ async def _authenticate(session: AsyncSession, username: str, password: str) -> 
 
 def _tokens(admin: Admin) -> TokenOut:
     return TokenOut(
-        access_token=create_access_token(admin.id, admin.username, admin.role),
-        refresh_token=create_refresh_token(admin.id, admin.username, admin.role),
+        access_token=create_access_token(
+            admin.id, admin.username, admin.role, tenant_id=admin.tenant_id
+        ),
+        refresh_token=create_refresh_token(
+            admin.id, admin.username, admin.role, tenant_id=admin.tenant_id
+        ),
     )
 
 

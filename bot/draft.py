@@ -12,24 +12,18 @@ from __future__ import annotations
 from aiogram.exceptions import TelegramAPIError
 
 from bot.cards import build_draft_payload
-from bot.client import get_bot
+from bot.client import get_bot, get_bot_for_tenant
 from shared.config import get_settings
 from shared.db import SessionLocal
 from shared.enums import EventAction
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, SourceChannel
+from shared.tenant import get_tenant_for_channel
 
 log = get_logger("bot.draft")
 
 
 async def post_draft(ctx: dict, post_id: int) -> str:
-    settings = get_settings()
-    bot = get_bot()
-    group_id = settings.editor_group_id
-    if not group_id:
-        log.error("editor-group-not-configured")
-        return "no_editor_group"
-
     async with SessionLocal() as session:
         post = await session.get(Post, post_id)
         if post is None:
@@ -39,6 +33,23 @@ async def post_draft(ctx: dict, post_id: int) -> str:
             return "no_channel"
         text, keyboard = await build_draft_payload(post, channel, session)
 
+    settings = get_settings()
+    editor_group_id = settings.editor_group_id
+    bot = get_bot()
+
+    # Resolve tenant-specific editor group and bot.
+    if post.tenant_id:
+        async with SessionLocal() as session:
+            tenant = await get_tenant_for_channel(session, post.source_channel_id)
+        if tenant is not None:
+            if tenant.editor_group_id:
+                editor_group_id = tenant.editor_group_id
+            bot = get_bot_for_tenant(tenant.id, tenant.bot_token)
+
+    if not editor_group_id:
+        log.error("editor-group-not-configured")
+        return "no_editor_group"
+
     if post.normalized_text is None:
         log.warning("draft-before-normalize", post_id=post_id)
         return "not_normalized"
@@ -47,13 +58,15 @@ async def post_draft(ctx: dict, post_id: int) -> str:
         if post.draft_message_id:
             await bot.edit_message_text(
                 text=text,
-                chat_id=group_id,
+                chat_id=editor_group_id,
                 message_id=post.draft_message_id,
                 reply_markup=keyboard,
             )
             action = "refreshed"
         else:
-            msg = await bot.send_message(chat_id=group_id, text=text, reply_markup=keyboard)
+            msg = await bot.send_message(
+                chat_id=editor_group_id, text=text, reply_markup=keyboard
+            )
             async with SessionLocal() as session:
                 p = await session.get(Post, post_id)
                 if p is not None:
@@ -62,7 +75,10 @@ async def post_draft(ctx: dict, post_id: int) -> str:
                         PostEvent(
                             post_id=post_id,
                             action=EventAction.draft_posted,
-                            payload={"chat_id": group_id, "message_id": msg.message_id},
+                            payload={
+                                "chat_id": editor_group_id,
+                                "message_id": msg.message_id,
+                            },
                         )
                     )
                     await session.commit()

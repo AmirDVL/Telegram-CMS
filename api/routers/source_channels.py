@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import require_role
+from api.deps import get_tenant_id, require_role
 from api.schemas import (
     SourceChannelCreate,
     SourceChannelOut,
@@ -17,6 +17,7 @@ from shared.config import get_settings
 from shared.db import get_session
 from shared.enums import PostState, Role
 from shared.models import Admin, Post, SourceChannel, SourceChannelTag, Tag
+from shared.tenant import scope_query, stamp_tenant
 
 # States that are safe to cascade-delete (content is already finalised).
 _TERMINAL_STATES = {PostState.published, PostState.rejected}
@@ -49,8 +50,12 @@ async def _set_default_tag_links(
 async def list_channels(
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> list[SourceChannel]:
-    result = await session.execute(select(SourceChannel).order_by(SourceChannel.title))
+    stmt = scope_query(
+        select(SourceChannel).order_by(SourceChannel.title), SourceChannel, tenant_id
+    )
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -59,6 +64,7 @@ async def create_channel(
     payload: SourceChannelCreate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> SourceChannel:
     settings = get_settings()
     channel = SourceChannel(
@@ -71,7 +77,17 @@ async def create_channel(
         normalization_template_id=payload.normalization_template_id,
         max_media_size_bytes=payload.max_media_size_bytes or settings.media_max_size_default,
         source_label=payload.source_label,
+        # AI settings
+        ai_enabled=payload.ai_enabled,
+        ai_mode=payload.ai_mode,
+        ai_target_language=payload.ai_target_language,
+        ai_tone_prompt=payload.ai_tone_prompt,
+        ai_custom_system_prompt=payload.ai_custom_system_prompt,
+        watermark_enabled=payload.watermark_enabled,
+        watermark_text=payload.watermark_text,
+        strip_source_tags=payload.strip_source_tags,
     )
+    stamp_tenant(channel, tenant_id)
     session.add(channel)
     try:
         await session.flush()
@@ -90,9 +106,12 @@ async def update_channel(
     payload: SourceChannelUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> SourceChannel:
     channel = await session.get(SourceChannel, channel_id)
     if channel is None:
+        raise HTTPException(status_code=404, detail="source channel not found")
+    if tenant_id is not None and channel.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="source channel not found")
     data = payload.model_dump(exclude_unset=True)
     for field in (
@@ -103,6 +122,14 @@ async def update_channel(
         "normalization_template_id",
         "max_media_size_bytes",
         "source_label",
+        "ai_enabled",
+        "ai_mode",
+        "ai_target_language",
+        "ai_tone_prompt",
+        "ai_custom_system_prompt",
+        "watermark_enabled",
+        "watermark_text",
+        "strip_source_tags",
     ):
         if field in data:
             setattr(channel, field, data[field])

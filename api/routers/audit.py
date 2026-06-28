@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_current_admin
+from api.deps import get_current_admin, get_tenant_id
 from api.schemas import Paginated, PostEventOut
 from shared.db import get_session
 from shared.enums import EventAction
 from shared.models import PostEvent
+from shared.tenant import scope_query
 
 router = APIRouter(prefix="/audit", tags=["audit"], dependencies=[Depends(get_current_admin)])
 
@@ -22,6 +23,7 @@ async def list_events(
     limit: int = Query(default=100, le=500),
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Paginated:
     stmt = select(PostEvent)
     count_stmt = select(func.count(PostEvent.id))
@@ -31,6 +33,8 @@ async def list_events(
     if action:
         stmt = stmt.where(PostEvent.action.in_(action))
         count_stmt = count_stmt.where(PostEvent.action.in_(action))
+    stmt = scope_query(stmt, PostEvent, tenant_id)
+    count_stmt = scope_query(count_stmt, PostEvent, tenant_id)
     total = int((await session.scalar(count_stmt)) or 0)
     result = await session.execute(
         stmt.order_by(PostEvent.created_at.desc()).limit(limit).offset(offset)

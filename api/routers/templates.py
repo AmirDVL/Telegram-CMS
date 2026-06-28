@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import require_role
+from api.deps import get_tenant_id, require_role
 from api.schemas import TemplateCreate, TemplateOut, TemplateUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin, Template
+from shared.tenant import scope_query, stamp_tenant
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -19,8 +20,10 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 async def list_templates(
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> list[Template]:
-    result = await session.execute(select(Template).order_by(Template.name))
+    stmt = scope_query(select(Template).order_by(Template.name), Template, tenant_id)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -29,8 +32,10 @@ async def create_template(
     payload: TemplateCreate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Template:
     tpl = Template(name=payload.name, body=payload.body)
+    stamp_tenant(tpl, tenant_id)
     session.add(tpl)
     await session.commit()
     await session.refresh(tpl)

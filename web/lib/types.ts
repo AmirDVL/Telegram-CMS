@@ -18,13 +18,17 @@ export type EventAction =
   | "publish_failed"
   | "duplicate"
   | "media_omitted"
-  | "draft_posted";
+  | "draft_posted"
+  | "ai_transformed"
+  | "ai_failed";
+export type AIMode = "off" | "translate" | "summarize" | "retone" | "custom";
 
 export interface Admin {
   id: number;
   username: string;
   role: Role;
   tg_user_id: number | null;
+  tenant_id: number | null;
   created_at: string;
   disabled_at: string | null;
 }
@@ -44,7 +48,18 @@ export interface Template {
   created_at: string;
 }
 
-export interface SourceChannel {
+export interface AISettings {
+  ai_enabled: boolean;
+  ai_mode: AIMode;
+  ai_target_language: string | null;
+  ai_tone_prompt: string | null;
+  ai_custom_system_prompt: string | null;
+  watermark_enabled: boolean;
+  watermark_text: string | null;
+  strip_source_tags: boolean;
+}
+
+export interface SourceChannel extends AISettings {
   id: number;
   telegram_channel_id: number;
   title: string;
@@ -75,6 +90,7 @@ export interface Post {
   received_at: string;
   state: PostState;
   normalized_text: string | null;
+  ai_transformed_text: string | null;
   media_paths: unknown[];
   tag_ids: number[];
   scheduled_for: string | null;
@@ -106,4 +122,40 @@ export interface TokenOut {
   access_token: string;
   refresh_token: string;
   token_type: string;
+}
+
+export interface Tenant {
+  id: number;
+  slug: string;
+  name: string;
+  bot_token: string | null;
+  destination_channel_id: number | null;
+  editor_group_id: number | null;
+  ai_enabled: boolean;
+  ai_mode: AIMode;
+  ai_target_language: string | null;
+  ai_tone_prompt: string | null;
+  ai_custom_system_prompt: string | null;
+  watermark_enabled: boolean;
+  watermark_text: string | null;
+  strip_source_tags: boolean;
+  created_at: string;
+  disabled_at: string | null;
+}
+
+export interface AITestRequest {
+  text: string;
+  mode: AIMode;
+  target_language?: string;
+  tone_prompt?: string;
+  custom_system_prompt?: string;
+}
+
+export interface AITestResponse {
+  original: string;
+  transformed: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  latency_ms: number;
 }
