@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,11 +11,15 @@ import pytest
 from shared.enums import AIMode
 from shared.transform import (
     AITransformError,
-    TransformResult,
     _build_system_prompt,
     apply_watermark,
     transform_text,
 )
+
+# Create a fake 'openai' module so the late import inside transform_text
+# doesn't fail in test environments where openai isn't installed.
+_fake_openai = ModuleType("openai")
+_fake_openai.AsyncOpenAI = MagicMock  # type: ignore[attr-defined]
 
 
 # ── System prompt builder tests ──────────────────────────────────────────────
@@ -102,6 +108,17 @@ class TestApplyWatermark:
 # ── Transform text tests (with mocked OpenAI) ───────────────────────────────
 
 
+def _mock_settings(**overrides):
+    """Create a MagicMock settings object with sensible AI defaults."""
+    s = MagicMock()
+    s.ai_api_key = overrides.get("ai_api_key", "test-key")
+    s.ai_provider_url = overrides.get("ai_provider_url", "https://api.openai.com/v1")
+    s.ai_timeout_seconds = overrides.get("ai_timeout_seconds", 30)
+    s.ai_model = overrides.get("ai_model", "gpt-4o-mini")
+    s.ai_max_tokens = overrides.get("ai_max_tokens", 2048)
+    return s
+
+
 class TestTransformText:
     @pytest.mark.asyncio
     async def test_off_mode_returns_unchanged(self):
@@ -112,8 +129,8 @@ class TestTransformText:
 
     @pytest.mark.asyncio
     async def test_no_api_key_raises(self):
-        with patch("shared.transform.get_settings") as mock_settings:
-            mock_settings.return_value.ai_api_key = ""
+        with patch("shared.transform.get_settings") as mock_gs:
+            mock_gs.return_value = _mock_settings(ai_api_key="")
             with pytest.raises(AITransformError, match="AI_API_KEY"):
                 await transform_text("hello", mode=AIMode.translate)
 
@@ -121,32 +138,31 @@ class TestTransformText:
     async def test_successful_transform(self):
         mock_choice = MagicMock()
         mock_choice.message.content = "Translated text here"
-
         mock_usage = MagicMock()
         mock_usage.prompt_tokens = 10
         mock_usage.completion_tokens = 15
-
         mock_response = MagicMock()
         mock_response.choices = [mock_choice]
         mock_response.usage = mock_usage
         mock_response.model = "gpt-4o-mini"
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_client_cls = MagicMock()
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client_instance
 
-        with patch("shared.transform.get_settings") as mock_settings:
-            mock_settings.return_value.ai_api_key = "test-key"
-            mock_settings.return_value.ai_provider_url = "https://api.openai.com/v1"
-            mock_settings.return_value.ai_timeout_seconds = 30
-            mock_settings.return_value.ai_model = "gpt-4o-mini"
-            mock_settings.return_value.ai_max_tokens = 2048
+        fake_openai = ModuleType("openai")
+        fake_openai.AsyncOpenAI = mock_client_cls  # type: ignore[attr-defined]
 
-            with patch("shared.transform.AsyncOpenAI", return_value=mock_client):
-                result = await transform_text(
-                    "Hello world",
-                    mode=AIMode.translate,
-                    target_language="Persian",
-                )
+        with (
+            patch("shared.transform.get_settings", return_value=_mock_settings()),
+            patch.dict(sys.modules, {"openai": fake_openai}),
+        ):
+            result = await transform_text(
+                "Hello world",
+                mode=AIMode.translate,
+                target_language="Persian",
+            )
 
         assert result.text == "Translated text here"
         assert result.model == "gpt-4o-mini"
@@ -157,38 +173,39 @@ class TestTransformText:
     async def test_empty_response_raises(self):
         mock_choice = MagicMock()
         mock_choice.message.content = ""
-
         mock_response = MagicMock()
         mock_response.choices = [mock_choice]
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_client_cls = MagicMock()
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client_instance
 
-        with patch("shared.transform.get_settings") as mock_settings:
-            mock_settings.return_value.ai_api_key = "test-key"
-            mock_settings.return_value.ai_provider_url = "https://api.openai.com/v1"
-            mock_settings.return_value.ai_timeout_seconds = 30
-            mock_settings.return_value.ai_model = "gpt-4o-mini"
-            mock_settings.return_value.ai_max_tokens = 2048
+        fake_openai = ModuleType("openai")
+        fake_openai.AsyncOpenAI = mock_client_cls  # type: ignore[attr-defined]
 
-            with patch("shared.transform.AsyncOpenAI", return_value=mock_client):
-                with pytest.raises(AITransformError, match="empty response"):
-                    await transform_text("Hello", mode=AIMode.translate)
+        with (
+            patch("shared.transform.get_settings", return_value=_mock_settings()),
+            patch.dict(sys.modules, {"openai": fake_openai}),
+            pytest.raises(AITransformError, match="empty response"),
+        ):
+            await transform_text("Hello", mode=AIMode.translate)
 
     @pytest.mark.asyncio
     async def test_api_error_raises(self):
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(
+        mock_client_cls = MagicMock()
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create = AsyncMock(
             side_effect=Exception("Connection refused")
         )
+        mock_client_cls.return_value = mock_client_instance
 
-        with patch("shared.transform.get_settings") as mock_settings:
-            mock_settings.return_value.ai_api_key = "test-key"
-            mock_settings.return_value.ai_provider_url = "https://api.openai.com/v1"
-            mock_settings.return_value.ai_timeout_seconds = 30
-            mock_settings.return_value.ai_model = "gpt-4o-mini"
-            mock_settings.return_value.ai_max_tokens = 2048
+        fake_openai = ModuleType("openai")
+        fake_openai.AsyncOpenAI = mock_client_cls  # type: ignore[attr-defined]
 
-            with patch("shared.transform.AsyncOpenAI", return_value=mock_client):
-                with pytest.raises(AITransformError, match="LLM API call failed"):
-                    await transform_text("Hello", mode=AIMode.summarize)
+        with (
+            patch("shared.transform.get_settings", return_value=_mock_settings()),
+            patch.dict(sys.modules, {"openai": fake_openai}),
+            pytest.raises(AITransformError, match="LLM API call failed"),
+        ):
+            await transform_text("Hello", mode=AIMode.summarize)

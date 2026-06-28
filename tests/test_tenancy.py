@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-from sqlalchemy import BigInteger, String, select
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import select
 
+from shared.models import Post
 from shared.tenant import is_multi_tenant, scope_query, stamp_tenant
-
 
 # ── is_multi_tenant() ──────────────────────────────────────────────────────
 
@@ -53,8 +51,6 @@ class TestScopeQuery:
     def test_adds_where_clause_when_enabled(self):
         """When MT is on and tenant_id is set, the stmt should be mutated
         (not the same object as the input)."""
-        from shared.models import Base, Post
-
         with patch("shared.tenant.get_settings") as mock:
             mock.return_value.multi_tenancy_enabled = True
             original = select(Post)

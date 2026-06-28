@@ -5,13 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_current_admin, get_tenant_id, require_role
+from api.deps import get_tenant_id, require_role
 from api.schemas import AISettingsOut, AISettingsUpdate, AITestRequest, AITestResponse
 from shared.config import get_settings
 from shared.db import get_session
-from shared.enums import AIMode, Role
+from shared.enums import Role
 from shared.models import Admin, SourceChannel
-from shared.tenant import scope_query
 from shared.transform import AITransformError, transform_text
 
 router = APIRouter(prefix="/source-channels", tags=["ai-settings"])

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shared.enums import Policy, PostState
+from shared.enums import AIMode, Policy, PostState
 from shared.models import Post, SourceChannel
 from worker import normalize as norm_mod
 
@@ -43,6 +43,16 @@ def _make_channel(policy: Policy) -> SimpleNamespace:
         source_label="src",
         username=None,
         title="Src",
+        # AI transform (disabled by default in tests).
+        ai_enabled=False,
+        ai_mode=AIMode.off,
+        ai_target_language=None,
+        ai_tone_prompt=None,
+        ai_custom_system_prompt=None,
+        # Watermark/branding (disabled by default in tests).
+        watermark_enabled=False,
+        watermark_text=None,
+        strip_source_tags=False,
     )
 
 
