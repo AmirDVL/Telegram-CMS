@@ -41,8 +41,16 @@ The installer will:
 8. Install and enable `/etc/systemd/system/tg-cms.service` for automatic
    startup on boot.
 
-Re-running `install.sh` is safe — it is fully idempotent and will prompt before
-overwriting existing secrets.
+The installer auto-detects the Compose CLI and supports both the modern
+`docker compose` (v2 plugin) and the legacy standalone `docker-compose` (v1)
+binary. It also pins `COMPOSE_PROJECT_NAME=tg-cms` in `.env`, so the project's
+volumes are deterministically named `tg-cms_*` (e.g. `tg-cms_pgdata`,
+`tg-cms_media`) — the names used by the backup/restore commands in §6.
+
+Re-running `install.sh` is safe — it is fully idempotent. It preserves existing
+secrets by default, **never** regenerates the Postgres password against an
+already-initialized data volume (which would lock the stack out of its own
+database), and reuses any existing port remaps without re-prompting.
 
 After the installer finishes, complete the **one step that requires an interactive
 TTY** — the first-run userbot login:
