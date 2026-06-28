@@ -576,6 +576,155 @@ fi
 systemctl enable tg-cms
 log "tg-cms.service enabled (will start automatically on boot)."
 
+# ── 12.5. Zero-touch fleet auto-updates (opt-in) ─────────────────────────────
+echo
+box "━━━ Fleet auto-updates (optional) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+FLEET_UPDATES_ENABLED=false
+if ask_yn "Enable automatic zero-touch updates? (pulls and rebuilds on every new commit)"; then
+    FLEET_UPDATES_ENABLED=true
+
+    # ── Fleet role ────────────────────────────────────────────────────────────
+    echo
+    echo "  Fleet role:"
+    echo "    canary     — tracks origin/main; promotes stable on health-pass."
+    echo "    production — tracks origin/stable (canary-verified commits only)."
+    echo
+    ask_optional "  Role" FLEET_ROLE "production"
+    if [[ "$FLEET_ROLE" != "canary" && "$FLEET_ROLE" != "production" ]]; then
+        warn "Unknown role '${FLEET_ROLE}' — defaulting to production."
+        FLEET_ROLE=production
+    fi
+
+    if [[ "$FLEET_ROLE" == "canary" ]]; then
+        FLEET_TRACK_REF="origin/main"
+        log "Canary host: will track origin/main and promote stable on health-pass."
+        echo
+        warn "One-time operator step (if not done): create the 'stable' branch on the"
+        warn "remote so production hosts have a ref to track:"
+        warn "  git push origin main:stable"
+        echo
+        # Promotion token is optional; without it the operator/CI promotes manually.
+        ask_optional_secret \
+            "  GitHub push token for stable promotion (blank = use CI/operator)" \
+            FLEET_PROMOTE_TOKEN
+        if [[ -n "$FLEET_PROMOTE_TOKEN" ]]; then
+            FLEET_PROMOTE_REMOTE="origin"
+        else
+            FLEET_PROMOTE_REMOTE=""
+            log "No push token — stable will be advanced by CI/operator after canary is healthy."
+        fi
+    else
+        FLEET_TRACK_REF="origin/stable"
+        FLEET_PROMOTE_REMOTE=""
+        FLEET_PROMOTE_TOKEN=""
+        log "Production host: will track origin/stable (canary-verified commits only)."
+    fi
+
+    # ── Optional Telegram alerts ──────────────────────────────────────────────
+    echo
+    ask_optional "  Alert chat ID for update/rollback notifications (blank = none)" \
+        FLEET_ALERT_CHAT_ID ""
+
+    # ── Write /etc/tg-cms/fleet.conf (mode 600 — may hold a push token) ──────
+    FLEET_CONF_DIR="/etc/tg-cms"
+    FLEET_CONF_FILE="${FLEET_CONF_DIR}/fleet.conf"
+    mkdir -p "$FLEET_CONF_DIR"
+
+    FLEET_CONF_CONTENT="# /etc/tg-cms/fleet.conf — written by install.sh on $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+# Treat as a secret (mode 600): may contain a push token.
+INSTALL_DIR=\"${SCRIPT_DIR}\"
+DC_EXEC=\"${DC_EXEC}\"
+FLEET_ROLE=${FLEET_ROLE}
+FLEET_TRACK_REF=${FLEET_TRACK_REF}
+HEALTH_TIMEOUT=180"
+
+    [[ -n "$FLEET_PROMOTE_REMOTE" ]] && \
+        FLEET_CONF_CONTENT+="
+FLEET_PROMOTE_REMOTE=${FLEET_PROMOTE_REMOTE}"
+
+    [[ -n "${FLEET_PROMOTE_TOKEN:-}" ]] && \
+        FLEET_CONF_CONTENT+="
+FLEET_PROMOTE_TOKEN=${FLEET_PROMOTE_TOKEN}"
+
+    [[ -n "${FLEET_ALERT_CHAT_ID:-}" ]] && \
+        FLEET_CONF_CONTENT+="
+FLEET_ALERT_CHAT_ID=${FLEET_ALERT_CHAT_ID}
+BOT_TOKEN=${BOT_TOKEN}"
+
+    if [[ -f "$FLEET_CONF_FILE" ]] && [[ "$(cat "$FLEET_CONF_FILE")" == "$FLEET_CONF_CONTENT" ]]; then
+        log "Fleet config unchanged — skipping."
+    else
+        echo "$FLEET_CONF_CONTENT" > "$FLEET_CONF_FILE"
+        chmod 600 "$FLEET_CONF_FILE"
+        log "Fleet config written to ${FLEET_CONF_FILE} (mode 600)."
+    fi
+
+    # ── Make updater scripts executable ───────────────────────────────────────
+    chmod +x "${SCRIPT_DIR}/fleet/auto-update.sh"
+    chmod +x "${SCRIPT_DIR}/fleet/health-gate.sh"
+    log "fleet/auto-update.sh and fleet/health-gate.sh marked executable."
+
+    # ── Write systemd service unit (compare-before-write, same pattern as §12) ─
+    UPDATE_SVC_FILE="/etc/systemd/system/tg-cms-update.service"
+    UPDATE_SVC_CONTENT="[Unit]
+Description=tg-cms zero-touch fleet updater
+Documentation=https://github.com/AmirDVL/glm-testing/blob/main/docs/FLEET_UPDATES.md
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${SCRIPT_DIR}
+ExecStart=${SCRIPT_DIR}/fleet/auto-update.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target"
+
+    SYSTEMD_RELOAD_NEEDED=false
+    if [[ -f "$UPDATE_SVC_FILE" ]] && [[ "$(cat "$UPDATE_SVC_FILE")" == "$UPDATE_SVC_CONTENT" ]]; then
+        log "tg-cms-update.service unchanged — skipping."
+    else
+        echo "$UPDATE_SVC_CONTENT" > "$UPDATE_SVC_FILE"
+        SYSTEMD_RELOAD_NEEDED=true
+        log "tg-cms-update.service written to ${UPDATE_SVC_FILE}"
+    fi
+
+    # ── Write systemd timer unit (compare-before-write) ───────────────────────
+    UPDATE_TIMER_FILE="/etc/systemd/system/tg-cms-update.timer"
+    UPDATE_TIMER_CONTENT="[Unit]
+Description=Run tg-cms fleet updater every 5 minutes
+Documentation=https://github.com/AmirDVL/glm-testing/blob/main/docs/FLEET_UPDATES.md
+
+[Timer]
+OnUnitActiveSec=5min
+OnBootSec=5min
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target"
+
+    if [[ -f "$UPDATE_TIMER_FILE" ]] && [[ "$(cat "$UPDATE_TIMER_FILE")" == "$UPDATE_TIMER_CONTENT" ]]; then
+        log "tg-cms-update.timer unchanged — skipping."
+    else
+        echo "$UPDATE_TIMER_CONTENT" > "$UPDATE_TIMER_FILE"
+        SYSTEMD_RELOAD_NEEDED=true
+        log "tg-cms-update.timer written to ${UPDATE_TIMER_FILE}"
+    fi
+
+    if [[ "$SYSTEMD_RELOAD_NEEDED" == true ]]; then
+        systemctl daemon-reload
+        log "systemd daemon reloaded."
+    fi
+
+    systemctl enable --now tg-cms-update.timer
+    log "tg-cms-update.timer enabled and started."
+fi
+
 # ── 13. Post-install summary ──────────────────────────────────────────────────
 echo
 box "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -597,5 +746,15 @@ echo
 echo -e "  Manage the stack:"
 echo -e "     ${BOLD}sudo systemctl {start|stop|restart|status} tg-cms${RESET}"
 echo -e "     ${BOLD}${DC_HINT} logs -f${RESET}"
+echo
+if [[ "$FLEET_UPDATES_ENABLED" == true ]]; then
+    echo -e "  Auto-updates   : ${GREEN}enabled${RESET} (role: ${BOLD}${FLEET_ROLE}${RESET}, tracking ${BOLD}${FLEET_TRACK_REF}${RESET})"
+    echo -e "     Pause  : ${BOLD}sudo systemctl disable --now tg-cms-update.timer${RESET}"
+    echo -e "     Force  : ${BOLD}sudo systemctl start tg-cms-update.service${RESET}"
+    echo -e "     Logs   : ${BOLD}journalctl -u tg-cms-update -f${RESET}"
+    echo -e "     See also: ${CYAN}docs/FLEET_UPDATES.md${RESET}"
+else
+    echo -e "  Auto-updates   : ${YELLOW}disabled${RESET} (re-run install.sh to enable)"
+fi
 echo
 box "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

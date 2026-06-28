@@ -227,7 +227,57 @@ docker compose pull               # pull updated images (if any)
 docker compose up -d              # recreate changed containers only
 ```
 
-## 9. Monitoring (Prometheus + Grafana)
+## 9. Fleet updates & rollback
+
+`install.sh` can optionally install a systemd timer that polls the tracked git
+ref every ~5 minutes and zero-touch rebuilds the stack when a new commit lands.
+See [`docs/FLEET_UPDATES.md`](FLEET_UPDATES.md) for the full topology and
+canary/production setup guide.
+
+### Check update status
+
+```bash
+# Last run result (healthy / failed / skipped):
+systemctl status tg-cms-update
+
+# Live log of the updater:
+journalctl -u tg-cms-update -f
+
+# When the timer next fires:
+systemctl list-timers tg-cms-update.timer
+```
+
+### Pause / resume automatic updates
+
+```bash
+sudo systemctl disable --now tg-cms-update.timer   # pause
+sudo systemctl enable  --now tg-cms-update.timer   # resume
+```
+
+### Force an immediate update
+
+```bash
+sudo systemctl start tg-cms-update.service
+```
+
+### After a failed update (auto-rollback)
+
+When the health gate times out the updater automatically runs
+`git reset --hard $PREV` and rebuilds the old code. Check what went wrong:
+
+```bash
+journalctl -u tg-cms-update -n 200 --no-pager   # full updater log
+docker compose logs --tail=100                   # container logs
+```
+
+Once the root cause is fixed (or the bad commit is reverted on `main`/`stable`),
+the next timer tick will re-attempt the update automatically.
+
+> **Note:** DB migrations are not auto-downgraded. If a migration ran before
+> rollback, you may need `docker compose run --rm api alembic downgrade -1`.
+> See [`docs/FLEET_UPDATES.md`](FLEET_UPDATES.md) for details.
+
+## 10. Monitoring (Prometheus + Grafana)
 
 A ready-to-run observability stack ships in `docker-compose.yml`. It needs no
 Python configuration — Prometheus scrapes the API's `/metrics` endpoint
@@ -262,7 +312,7 @@ Useful signals when triaging the failure cheat-sheet below:
 - `api_http_requests_total` / `api_http_request_duration_seconds` — API traffic
   and latency by route.
 
-## 10. Open configuration (plan §9 defaults)
+## 11. Open configuration (plan §9 defaults)
 
 | Setting | Default | Env var |
 |---|---|---|

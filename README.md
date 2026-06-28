@@ -72,6 +72,12 @@ docker compose restart userbot
 Re-running `install.sh` at any time is safe — it is fully idempotent and will
 prompt before touching existing secrets.
 
+**Zero-touch updates:** `install.sh` can optionally install a systemd timer
+that polls the tracked git ref every ~5 minutes, rebuilds, health-gates, and
+auto-rolls back on failure. A canary host tracks `main` and promotes `stable`
+after a healthy rebuild; production hosts track `stable` (canary-verified
+commits only). See [`docs/FLEET_UPDATES.md`](docs/FLEET_UPDATES.md).
+
 See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for manual first-run steps, adding a
 source channel, rotating the userbot session, rotating secrets, and
 backup/restore.
@@ -84,6 +90,7 @@ backup/restore.
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | All environment variables, defaults, required flags |
 | [`docs/BOT_GUIDE.md`](docs/BOT_GUIDE.md) | Editor workflow, inline buttons, tags, templates, scheduling |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational procedures, backup/restore, failure handling |
+| [`docs/FLEET_UPDATES.md`](docs/FLEET_UPDATES.md) | Zero-touch fleet updates: topology, canary/production setup, rollback, caveats |
 | [`docs/api/`](docs/api/) | Full REST API reference (auth, queue, tags, templates, channels, admins, audit) |
 
 ## Observability

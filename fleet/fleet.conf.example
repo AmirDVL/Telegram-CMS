@@ -1,0 +1,53 @@
+# /etc/tg-cms/fleet.conf — host-level fleet configuration for tg-cms auto-updates.
+#
+# Written by install.sh (mode 600, owned by root). May contain a push token, so
+# it is never committed to the repo. Copy this example to /etc/tg-cms/fleet.conf
+# and edit the values if you need to configure a host manually rather than via
+# install.sh.
+#
+# ── Required ──────────────────────────────────────────────────────────────────
+
+# Absolute path to the tg-cms repo clone on this host.
+# Must be a git work tree. .env and docker-compose.override.yml live here.
+INSTALL_DIR=/opt/tg-cms
+
+# Compose CLI to use — must match how install.sh resolved it on this host.
+# Examples:
+#   DC_EXEC="/usr/bin/docker compose"   # Docker v2 plugin (most common)
+#   DC_EXEC="/usr/local/bin/docker-compose"  # legacy v1 standalone
+DC_EXEC="/usr/bin/docker compose"
+
+# Role of this host in the fleet topology.
+#   canary     — tracks origin/main; promotes stable on health-pass.
+#   production — tracks origin/stable (canary-verified commits only).
+FLEET_ROLE=production
+
+# Git ref this host should track. Set by install.sh based on FLEET_ROLE:
+#   canary     → origin/main
+#   production → origin/stable
+FLEET_TRACK_REF=origin/stable
+
+# Seconds to wait for all services to reach "healthy" before declaring failure
+# and triggering auto-rollback.
+HEALTH_TIMEOUT=180
+
+# ── Optional: stable promotion (canary hosts only) ────────────────────────────
+
+# Git remote name to push to when promoting stable. Usually "origin".
+# Leave blank to disable self-promotion (use CI or manual operator promotion instead).
+#FLEET_PROMOTE_REMOTE=origin
+
+# GitHub Personal Access Token (or deploy key equivalent) with push access to
+# the repository. Required only if FLEET_PROMOTE_REMOTE is set.
+# Stored in this file at mode 600 — never committed to git.
+#FLEET_PROMOTE_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxx
+
+# ── Optional: Telegram alerts ─────────────────────────────────────────────────
+
+# Telegram chat ID to send update/rollback alerts to.
+# Must be a chat that BOT_TOKEN's bot is a member of.
+#FLEET_ALERT_CHAT_ID=-1001234567890
+
+# Bot token used to send alerts. Can be the same as the tg-cms bot token.
+# Sourced from /etc/tg-cms/fleet.conf so it does not need to be in .env.
+#BOT_TOKEN=123456:changeme

@@ -47,6 +47,38 @@ def stamp_tenant(instance, tenant_id: int | None) -> None:
         instance.tenant_id = tenant_id
 
 
+async def get_scoped(session: AsyncSession, model, pk, tenant_id: int | None):
+    """Fetch ``model`` by primary key and assert tenant ownership.
+
+    Returns ``None`` if the row does not exist **or** if multi-tenancy is on
+    and the row belongs to a different tenant.  When multi-tenancy is off this
+    is a plain ``session.get``.
+    """
+    inst = await session.get(model, pk)
+    if inst is None:
+        return None
+    if is_multi_tenant() and tenant_id is not None and getattr(inst, "tenant_id", None) != tenant_id:
+        return None
+    return inst
+
+
+def effective(name: str, tenant) -> object:
+    """Resolve a config value: return tenant override if set, else global setting.
+
+    ``tenant`` may be ``None`` (single-tenant / no tenant context) — in that
+    case the global setting is always returned.
+
+    Example::
+
+        spacing = effective("publish_spacing_seconds", tenant)
+    """
+    if tenant is not None:
+        val = getattr(tenant, name, None)
+        if val is not None:
+            return val
+    return getattr(get_settings(), name)
+
+
 async def get_tenant_for_channel(session: AsyncSession, channel_id: int):
     """Resolve the Tenant row for a source channel (if any).
 

@@ -25,13 +25,13 @@ from shared.db import get_session
 from shared.enums import EventAction, PostState
 from shared.models import Admin, Post, PostEvent
 from shared.tasks import enqueue_publish
-from shared.tenant import scope_query
+from shared.tenant import get_scoped, scope_query
 
 router = APIRouter(prefix="/queue", tags=["queue"], dependencies=[Depends(get_current_admin)])
 
 
-async def _get_post(session: AsyncSession, post_id: int) -> Post:
-    post = await session.get(Post, post_id)
+async def _get_post(session: AsyncSession, post_id: int, tenant_id: int | None) -> Post:
+    post = await get_scoped(session, Post, post_id, tenant_id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
     return post
@@ -72,8 +72,12 @@ async def list_queue(
 
 
 @router.get("/{post_id}", response_model=PostOut)
-async def get_post(post_id: int, session: AsyncSession = Depends(get_session)) -> Post:
-    return await _get_post(session, post_id)
+async def get_post(
+    post_id: int,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: int | None = Depends(get_tenant_id),
+) -> Post:
+    return await _get_post(session, post_id, tenant_id)
 
 
 @router.patch("/{post_id}/tags", response_model=PostOut)
@@ -82,8 +86,9 @@ async def edit_tags(
     payload: PostEditTags,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
-    post = await _get_post(session, post_id)
+    post = await _get_post(session, post_id, tenant_id)
     post.tag_ids = list(payload.tag_ids)
     await _event(session, post, EventAction.edited, actor, {"tag_ids": post.tag_ids})
     await session.commit()
@@ -96,8 +101,9 @@ async def _decide(
     decision: PostDecision,
     session: AsyncSession,
     actor: Admin,
+    tenant_id: int | None = None,
 ) -> Post:
-    post = await _get_post(session, post_id)
+    post = await _get_post(session, post_id, tenant_id)
     if decision.tag_ids is not None:
         post.tag_ids = list(decision.tag_ids)
 
@@ -141,8 +147,9 @@ async def decide(
     decision: PostDecision,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
-    return await _decide(post_id, decision, session, actor)
+    return await _decide(post_id, decision, session, actor, tenant_id)
 
 
 @router.post("/{post_id}/approve", response_model=PostOut)
@@ -151,12 +158,13 @@ async def approve(
     payload: PostEditTags | None = None,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(
         action="approve",
         tag_ids=payload.tag_ids if payload else None,
     )
-    return await _decide(post_id, decision, session, actor)
+    return await _decide(post_id, decision, session, actor, tenant_id)
 
 
 @router.post("/{post_id}/schedule", response_model=PostOut)
@@ -165,9 +173,10 @@ async def schedule(
     payload: PostSchedule,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(action="schedule", scheduled_for=payload.scheduled_for)
-    return await _decide(post_id, decision, session, actor)
+    return await _decide(post_id, decision, session, actor, tenant_id)
 
 
 @router.post("/{post_id}/reject", response_model=PostOut)
@@ -175,6 +184,7 @@ async def reject(
     post_id: int,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(action="reject")
-    return await _decide(post_id, decision, session, actor)
+    return await _decide(post_id, decision, session, actor, tenant_id)

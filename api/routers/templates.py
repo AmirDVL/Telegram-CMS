@@ -11,7 +11,7 @@ from api.schemas import TemplateCreate, TemplateOut, TemplateUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin, Template
-from shared.tenant import scope_query, stamp_tenant
+from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 

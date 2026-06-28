@@ -17,7 +17,7 @@ from shared.config import get_settings
 from shared.db import get_session
 from shared.enums import PostState, Role
 from shared.models import Admin, Post, SourceChannel, SourceChannelTag, Tag
-from shared.tenant import scope_query, stamp_tenant
+from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 # States that are safe to cascade-delete (content is already finalised).
 _TERMINAL_STATES = {PostState.published, PostState.rejected}
@@ -146,8 +146,9 @@ async def delete_channel(
     channel_id: int,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> None:
-    channel = await session.get(SourceChannel, channel_id)
+    channel = await get_scoped(session, SourceChannel, channel_id, tenant_id)
     if channel is None:
         raise HTTPException(status_code=404, detail="source channel not found")
 
