@@ -1,0 +1,184 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cms}
+      POSTGRES_DB: cms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cms -d cms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Local telegram-bot-api server: bypasses the 50 MB cloud upload limit (≤2 GB).
+  botapi:
+    image: aiogram/telegram-bot-api:latest
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: "true"
+      # Max size of a file being downloaded/uploaded by the bot (bytes). 2 GB.
+      TELEGRAM_API_FILES_SIZE_LIMIT: ${MEDIA_MAX_SIZE_DEFAULT:-2147483648}
+    volumes:
+      - botapidata:/var/lib/telegram-bot-api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ARQ worker: normalization + dedupe pruning + publish reconcile.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "worker"]
+    volumes:
+      - media:/media
+      - sessiondata:/data/sessions
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Userbot (Telethon MTProto): reads third-party source channels + downloads media.
+  userbot:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "userbot"]
+    volumes:
+      - media:/media
+      - sessiondata:/data/sessions
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8084/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Bot API bot (aiogram 3): admin surface + publish worker + delayed scheduled jobs.
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      botapi:
+        condition: service_healthy
+    command: ["python", "-m", "bot"]
+    volumes:
+      - media:/media
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # FastAPI back-office.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Next.js web back-office.
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NEXT_PUBLIC_API_URL: ${WEB_PUBLIC_API_URL:-https://${APP_DOMAIN}/api}
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Caddy: reverse proxy + automatic TLS for web + api.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    depends_on:
+      - web
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  botapidata:
+  media:
+  sessiondata:
+  caddydata:
+  caddyconfig:

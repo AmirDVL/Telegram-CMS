@@ -1,0 +1,24 @@
+{
+	email admin@{$APP_DOMAIN}
+}
+
+:80 {
+	redir https://{host}{uri} 301
+}
+
+{$APP_DOMAIN} {
+	# API under /api -> FastAPI
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Long-lived API routes (health, docs)
+	handle /healthz {
+		reverse_proxy api:8000
+	}
+
+	# Everything else -> Next.js web back-office
+	handle {
+		reverse_proxy web:3000
+	}
+}

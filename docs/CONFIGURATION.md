@@ -1,0 +1,338 @@
+# Configuration Reference
+
+All configuration is supplied via environment variables, typically through a `.env` file at the project root. The Python services load settings from `shared/config.py` using Pydantic Settings. Docker-only variables (e.g. `POSTGRES_PASSWORD`) are consumed only by the container and are never read by Python code.
+
+---
+
+## Minimal `.env` for Production
+
+The following variables have no safe default and must be set before starting the stack:
+
+```dotenv
+# Database
+POSTGRES_PASSWORD=change_me
+POSTGRES_DSN=postgresql+asyncpg://cms:change_me@postgres:5432/cms
+
+# Auth
+JWT_SECRET=change_me_to_a_long_random_string
+SEED_ADMIN_PASSWORD=change_me
+
+# Telegram Bot
+BOT_TOKEN=123456:ABC-your-bot-token
+DESTINATION_CHANNEL_ID=-1001234567890
+EDITOR_GROUP_ID=-1009876543210
+
+# Userbot (MTProto)
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
+
+# Web
+APP_DOMAIN=example.com
+CORS_ORIGINS=https://example.com
+NEXT_PUBLIC_API_URL=https://example.com/api
+```
+
+---
+
+## Database
+
+### `POSTGRES_DSN`
+
+Full asyncpg connection URL used by the Python services.
+
+- **Default:** `postgresql+asyncpg://cms:cms@postgres:5432/cms`
+- **Used by:** api, worker, bot, userbot
+- **Required in production:** yes — the default password `cms` must be changed and must match `POSTGRES_PASSWORD`
+
+### `POSTGRES_PASSWORD`
+
+Password for the PostgreSQL superuser. Consumed only by the Postgres Docker container (`POSTGRES_PASSWORD` env var). Not read by any Python service.
+
+- **Default:** `cms`
+- **Used by:** postgres container only
+- **Required in production:** yes — must match the password in `POSTGRES_DSN`
+
+---
+
+## Redis
+
+### `REDIS_URL`
+
+Redis connection URL used by all services for the ARQ job queue and delayed publish jobs.
+
+- **Default:** `redis://redis:6379/0`
+- **Used by:** api, worker, bot, userbot
+- **Required:** no (default works inside the Docker Compose network)
+
+---
+
+## Auth & Security
+
+### `JWT_SECRET`
+
+Secret key used to sign and verify HS256 JWTs. The API service fails to start if this is empty or set to a known placeholder value.
+
+- **Default:** _(empty — startup fails)_
+- **Used by:** api
+- **Required:** yes
+
+### `JWT_ALGO`
+
+JWT signing algorithm.
+
+- **Default:** `HS256`
+- **Used by:** api
+- **Required:** no
+
+### `ACCESS_TOKEN_TTL_MINUTES`
+
+Lifetime of a JWT access token in minutes.
+
+- **Default:** `30`
+- **Used by:** api
+- **Required:** no
+
+### `REFRESH_TOKEN_TTL_DAYS`
+
+Lifetime of the refresh token and its `httpOnly` cookie in days.
+
+- **Default:** `14`
+- **Used by:** api
+- **Required:** no
+
+### `SEED_ADMIN_USERNAME`
+
+Username for the super-admin account created by the API seeding CLI command.
+
+- **Default:** `admin`
+- **Used by:** api (CLI seed command)
+- **Required:** no
+
+### `SEED_ADMIN_PASSWORD`
+
+Password for the seeded super-admin. The seed command fails if this is empty.
+
+- **Default:** _(empty — seed fails)_
+- **Used by:** api (CLI seed command)
+- **Required:** yes (when running the seed command)
+
+### `CORS_ORIGINS`
+
+Comma-separated list of allowed CORS origins, or `*` for wildcard.
+
+- **Default:** `*`
+- **Used by:** api
+- **Required:** no, but **must be set explicitly in production**
+
+> **Warning:** when set to `*`, FastAPI disables `allow_credentials`. This means the browser will not send the `httpOnly` refresh cookie on cross-origin requests. In production, set this to the exact origin of the web UI (e.g. `https://example.com`).
+
+---
+
+## Retention & Limits
+
+### `DEDUPE_LOOKBACK_DAYS`
+
+Number of days back to check for duplicate content when a post is normalised or published.
+
+- **Default:** `7`
+- **Used by:** worker, bot
+- **Required:** no
+
+### `AUDIT_RETENTION_DAYS`
+
+Number of days to keep `post_events` audit rows. Older rows are deleted by the daily `prune_dedupe` cron job.
+
+- **Default:** `90`
+- **Used by:** worker
+- **Required:** no
+
+### `MEDIA_RETENTION_DAYS`
+
+Number of days to keep downloaded media files on disk after a post is published. Older orphaned files are deleted by the daily cron job.
+
+- **Default:** `30`
+- **Used by:** worker
+- **Required:** no
+
+### `MAX_CONCURRENT_PUBLISHES`
+
+Maximum number of publish jobs that may run in parallel.
+
+- **Default:** `1`
+- **Used by:** bot (ARQ worker settings), worker
+- **Required:** no
+
+### `PUBLISH_SPACING_SECONDS`
+
+Minimum number of seconds between consecutive publish operations. Prevents Telegram rate-limit errors from bursts.
+
+- **Default:** `2.0`
+- **Used by:** bot
+- **Required:** no
+
+### `MEDIA_MAX_SIZE_DEFAULT`
+
+Maximum media file size in bytes. Files larger than this limit are skipped during download by the userbot.
+
+- **Default:** `2147483648` (2 GiB)
+- **Used by:** userbot, botapi
+- **Required:** no
+
+---
+
+## Telegram Bot
+
+### `BOT_TOKEN`
+
+Telegram Bot API token issued by BotFather. Required to authenticate the aiogram bot.
+
+- **Default:** _(none)_
+- **Used by:** bot
+- **Required:** yes
+
+### `BOT_API_SERVER_URL`
+
+Base URL of the local Telegram Bot API server. The bot routes all Telegram API calls through this server to bypass the 50 MB cloud upload limit.
+
+- **Default:** `http://botapi:8081`
+- **Used by:** bot
+- **Required:** no (default works inside the Docker Compose network)
+
+### `BOT_API_SERVER_FILE_PATH`
+
+Filesystem path where the local Bot API server stores downloaded files, as mounted inside the **bot** container. Used to resolve local file paths when sending media.
+
+- **Default:** `/var/lib/telegram-bot-api`
+- **Used by:** bot
+- **Required:** no
+
+### `DESTINATION_CHANNEL_ID`
+
+Numeric Telegram channel ID of the channel that approved posts are published to. Must be negative (e.g. `-1001234567890`).
+
+- **Default:** _(none)_
+- **Used by:** bot
+- **Required:** yes
+
+### `EDITOR_GROUP_ID`
+
+Numeric Telegram ID of the private supergroup where draft cards are posted for editorial review. Must be negative. Inline button callbacks are rejected if they originate from any other chat.
+
+- **Default:** _(none)_
+- **Used by:** bot
+- **Required:** yes
+
+---
+
+## Userbot (MTProto)
+
+### `TELEGRAM_API_ID`
+
+MTProto API ID from [my.telegram.org](https://my.telegram.org). Required for the Telethon userbot and the local Bot API server.
+
+- **Default:** _(none)_
+- **Used by:** userbot, botapi
+- **Required:** yes
+
+### `TELEGRAM_API_HASH`
+
+MTProto API hash from [my.telegram.org](https://my.telegram.org).
+
+- **Default:** _(none)_
+- **Used by:** userbot, botapi
+- **Required:** yes
+
+### `TELEGRAM_SESSION_NAME`
+
+Base filename for the Telethon `.session` file (no extension). The file is stored in `SESSION_DIR`.
+
+- **Default:** `cms_userbot`
+- **Used by:** userbot
+- **Required:** no
+
+### `TELEGRAM_2FA_PASSWORD`
+
+Two-factor authentication password for the userbot Telegram account. Only required if 2FA is enabled on that account.
+
+- **Default:** _(none)_
+- **Used by:** userbot
+- **Required:** only if the userbot account has 2FA enabled
+
+### `SESSION_DIR`
+
+Directory on disk where the Telethon `.session` file is stored. Mapped to a named Docker volume shared between userbot and worker.
+
+- **Default:** `/data/sessions`
+- **Used by:** userbot
+- **Required:** no
+
+### `MEDIA_DIR`
+
+Directory on disk where the userbot writes downloaded media files. The bot service reads from the same path via a shared volume.
+
+- **Default:** `/media`
+- **Used by:** userbot, worker
+- **Required:** no
+
+---
+
+## Web & API
+
+### `APP_DOMAIN`
+
+Public domain name of the deployment. Used by Caddy for automatic TLS certificate provisioning, by the API to set the `Secure` flag on the refresh cookie, and to construct public URLs.
+
+- **Default:** `localhost`
+- **Used by:** api, caddy
+- **Required:** yes in production
+
+### `API_BASE_URL`
+
+Internal base URL of the API service, used by Next.js server-side API routes to proxy requests.
+
+- **Default:** `http://api:8000`
+- **Used by:** web (server-side)
+- **Required:** no (default works inside the Docker Compose network)
+
+### `WEB_BASE_URL`
+
+Internal base URL of the web service.
+
+- **Default:** `http://web:3000`
+- **Used by:** (internal reference)
+- **Required:** no
+
+### `NEXT_PUBLIC_API_URL`
+
+Publicly accessible base URL of the API, used by the browser-side Next.js code. Must be reachable from the user's browser.
+
+- **Default:** `https://${APP_DOMAIN}/api`
+- **Used by:** web (client-side)
+- **Required:** yes in production (default uses `APP_DOMAIN`)
+
+---
+
+## Internal
+
+These ports are only used for Docker healthcheck probes and are not exposed publicly.
+
+### `BOT_HEALTH_PORT`
+
+Internal HTTP port for the bot service health endpoint (`GET /healthz`).
+
+- **Default:** `8082`
+- **Used by:** bot, Docker healthcheck
+
+### `WORKER_HEALTH_PORT`
+
+Internal HTTP port for the worker service health endpoint (`GET /healthz`).
+
+- **Default:** `8083`
+- **Used by:** worker, Docker healthcheck
+
+### `USERBOT_HEALTH_PORT`
+
+Internal HTTP port for the userbot service health endpoint (`GET /healthz`).
+
+- **Default:** `8084`
+- **Used by:** userbot, Docker healthcheck

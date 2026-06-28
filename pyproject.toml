@@ -1,0 +1,75 @@
+[project]
+name = "tg-cms"
+version = "0.1.0"
+description = "Telegram CMS Bot — unify third-party channel content into one destination channel"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+  "sqlalchemy>=2.0.30",
+  "asyncpg>=0.29.0",
+  "alembic>=1.13.2",
+  "fastapi>=0.111.0",
+  "uvicorn[standard]>=0.29.0",
+  "aiogram>=3.7.0",
+  "telethon>=1.36.0",
+  "cryptg>=0.4.0",
+  "arq>=0.25.0",
+  "redis>=5.0.4",
+  "pydantic>=2.7.1",
+  "pydantic-settings>=2.2.1",
+  "argon2-cffi>=23.1.0",
+  "pyjwt>=2.8.0",
+  "jinja2>=3.1.3",
+  "httpx>=0.27.0",
+  "aiohttp>=3.9.0",
+  "slowapi>=0.1.9",
+  "structlog>=24.1.0",
+  "tenacity>=8.2.3",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.4.4",
+  "mypy>=1.10.0",
+  "pytest>=8.2.0",
+  "pytest-asyncio>=0.23.7",
+  "anyio>=4.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shared*", "api*", "bot*", "userbot*", "worker*", "migrations*"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# B008: FastAPI Depends() in default args is the intended pattern.
+# RUF012: ARQ WorkerSettings use mutable class attributes by design.
+# UP042: keep the classic `class X(str, Enum)` form for serialization stability.
+# SIM105: long-running services intentionally swallow broad exceptions.
+ignore = ["E501", "B008", "RUF012", "UP042", "SIM105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["shared", "api", "bot", "userbot", "worker", "migrations"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff.format]
+quote-style = "double"
