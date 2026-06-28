@@ -6,6 +6,11 @@ This is a single-tenant Telegram content management system. A long-running Telet
 
 A FastAPI back-office API and a Next.js 14 web UI provide editorial control: reviewing drafts, managing tags and templates, scheduling posts, and administering users.
 
+The full stack is deployed by `install.sh` (repository root), which handles OS
+detection, Docker installation, secret generation, port conflict resolution, and
+systemd service registration. See [`RUNBOOK.md`](RUNBOOK.md) for operational
+procedures.
+
 ---
 
 ## Services

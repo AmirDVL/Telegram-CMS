@@ -51,27 +51,30 @@ Telegram publishing.
 
 ## Quick start
 
+Run the installer as root. It detects your package manager, installs Docker if
+needed, generates all secrets, prompts for Telegram credentials, checks for port
+conflicts, writes `.env` and `docker-compose.override.yml`, brings up the stack,
+and registers a systemd service for automatic boot startup.
+
 ```bash
-cp .env.example .env
-# fill in TELEGRAM_API_ID/HASH, BOT_TOKEN, destination/editor ids, JWT_SECRET,
-# and SEED_ADMIN_PASSWORD
-
-# bring up infrastructure
-docker compose up -d postgres redis botapi
-
-# run migrations + seed the super-admin
-docker compose run --rm api python -m api.cli migrate
-docker compose run --rm api python -m api.cli seed-admin
-
-# first-run userbot login (interactive: phone → code → 2FA)
-docker compose run --rm userbot python -m userbot.login
-
-# start everything
-docker compose up -d
+sudo bash install.sh
 ```
 
-See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for first-run login, adding a source
-channel, rotating the userbot session, rotating secrets, and backup/restore.
+After the installer finishes, complete the one step that requires an interactive
+TTY — the first-run userbot login:
+
+```bash
+docker compose run --rm -it userbot python -m userbot.login
+# Enter: phone number → verification code → 2FA password (if set)
+docker compose restart userbot
+```
+
+Re-running `install.sh` at any time is safe — it is fully idempotent and will
+prompt before touching existing secrets.
+
+See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for manual first-run steps, adding a
+source channel, rotating the userbot session, rotating secrets, and
+backup/restore.
 
 ## Documentation
 
@@ -124,8 +127,16 @@ supplied via env secret.
 
 ## Configuration defaults (plan §9)
 
+`install.sh` generates the secrets below automatically. All other settings use
+the defaults shown here; edit `.env` afterwards to override any of them.
+
 | Setting | Default | Env var |
 |---|---|---|
+| Postgres password | auto-generated | `POSTGRES_PASSWORD` |
+| Redis password | auto-generated | `REDIS_PASSWORD` |
+| JWT secret | auto-generated | `JWT_SECRET` |
+| Seed admin password | auto-generated | `SEED_ADMIN_PASSWORD` |
+| Grafana admin password | auto-generated | `GRAFANA_ADMIN_PASSWORD` |
 | Dedupe lookback window | 7 days | `DEDUPE_LOOKBACK_DAYS` |
 | Audit-log retention | 90 days | `AUDIT_RETENTION_DAYS` |
 | Media retention on volume | 30 days post-publish | `MEDIA_RETENTION_DAYS` |

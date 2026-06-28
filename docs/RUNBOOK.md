@@ -4,7 +4,9 @@ Operational procedures for the single-tenant Telegram CMS deployment.
 
 ## 0. Prerequisites
 
-- A Linux VPS with Docker + Docker Compose.
+- A Linux VPS (Ubuntu 22.04/24.04, Debian 12, RHEL/Rocky/Alma 8–9, or similar).
+  Docker + Docker Compose are installed automatically by `install.sh` if missing.
+- Root / sudo access (`install.sh` must run as root).
 - A **dedicated** Telegram user account for the userbot (with 2FA enabled). Do
   **not** use a personal account.
 - A **Bot API bot** token from [@BotFather](https://t.me/BotFather).
@@ -16,31 +18,72 @@ Operational procedures for the single-tenant Telegram CMS deployment.
 
 ## 1. First run
 
+### Automated (recommended)
+
 ```bash
-cp .env.example .env
-# Edit .env: TELEGRAM_API_ID/HASH, BOT_TOKEN, DESTINATION_CHANNEL_ID,
-# EDITOR_GROUP_ID, JWT_SECRET, SEED_ADMIN_PASSWORD, APP_DOMAIN
+sudo bash install.sh
+```
 
-# 1. Start infrastructure
-docker compose up -d postgres redis botapi
+The installer will:
 
-# 2. Apply migrations + seed the super-admin + default tags/template
-docker compose run --rm api python -m api.cli migrate
+1. Detect the host package manager (`apt` / `dnf` / `yum`) and install Docker if
+   missing.
+2. Optionally configure an HTTP proxy or registry mirrors for the Docker daemon
+   (prompted interactively — useful in restricted network environments).
+3. Generate secure random values for `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
+   `JWT_SECRET`, `SEED_ADMIN_PASSWORD`, and `GRAFANA_ADMIN_PASSWORD`.
+4. Prompt for all required Telegram credentials and the public domain.
+5. Check for host port conflicts on 80, 443, and 3001; offer to remap any that
+   are already in use.
+6. Write `.env` (mode 600) and `docker-compose.override.yml` (Redis auth +
+   any remapped ports).
+7. Bring up the full stack, run migrations, and seed the super-admin.
+8. Install and enable `/etc/systemd/system/tg-cms.service` for automatic
+   startup on boot.
 
-# 3. First-run userbot login (interactive TTY — Telethon asks for phone/code/2FA)
+Re-running `install.sh` is safe — it is fully idempotent and will prompt before
+overwriting existing secrets.
+
+After the installer finishes, complete the **one step that requires an interactive
+TTY** — the first-run userbot login:
+
+```bash
 docker compose run --rm -it userbot python -m userbot.login
+#   -> Enter phone → verification code → 2FA password (if set)
 #   -> "Session saved."  The .session file now lives in the sessiondata volume.
-
-# 4. Start everything
-docker compose up -d
+docker compose restart userbot
 ```
 
 Verify:
 
 ```bash
-docker compose ps                       # all healthy
-curl http://localhost/healthz 2>/dev/null || true   # via Caddy once TLS is up
-# Web back-office: https://<APP_DOMAIN>  (login with SEED_ADMIN_*)
+docker compose ps                              # all containers healthy
+curl -s http://localhost:8000/healthz          # API responds
+# Web back-office: https://<APP_DOMAIN>  (login with admin / <SEED_ADMIN_PASSWORD>)
+```
+
+### Manual alternative
+
+If you need to set up without the installer:
+
+```bash
+cp .env.example .env
+# Edit .env: set TELEGRAM_API_ID/HASH, BOT_TOKEN, DESTINATION_CHANNEL_ID,
+# EDITOR_GROUP_ID, JWT_SECRET, SEED_ADMIN_PASSWORD, APP_DOMAIN,
+# POSTGRES_PASSWORD, REDIS_PASSWORD, GRAFANA_ADMIN_PASSWORD
+
+# 1. Start infrastructure
+docker compose up -d postgres redis botapi
+
+# 2. Apply migrations + seed the super-admin
+docker compose run --rm api python -m api.cli migrate
+docker compose run --rm api python -m api.cli seed-admin
+
+# 3. First-run userbot login (interactive TTY)
+docker compose run --rm -it userbot python -m userbot.login
+
+# 4. Start everything
+docker compose up -d
 ```
 
 ## 2. Adding a source channel
@@ -85,15 +128,28 @@ docker compose start userbot
 
 ## 5. Rotating secrets
 
-- **JWT_SECRET** (web auth): changing it invalidates all sessions. Update
+The easiest way to rotate all auto-generated secrets at once is to re-run the
+installer and answer **Y** when it asks whether to regenerate secrets:
+
+```bash
+sudo bash install.sh
+```
+
+To rotate individual secrets manually:
+
+- **JWT_SECRET** (web auth): changing it invalidates all active sessions. Update
   `.env`, then `docker compose up -d api`.
 - **BOT_TOKEN**: get a new token from BotFather, update `.env`, then
   `docker compose up -d bot`.
 - **TELEGRAM_2FA_PASSWORD**: update the account's 2FA in a Telegram client, set
   the new value in `.env`, then `docker compose up -d userbot`.
-- **Postgres password**: change in Postgres, update `POSTGRES_DSN` in `.env`
-  (the password is embedded in the DSN), update `POSTGRES_PASSWORD` for the
-  Docker container itself, then restart dependent services.
+- **POSTGRES_PASSWORD**: change the password in Postgres, update both
+  `POSTGRES_PASSWORD` and `POSTGRES_DSN` in `.env` (the password is embedded in
+  the DSN), then `docker compose up -d`.
+- **REDIS_PASSWORD**: update `REDIS_PASSWORD` in `.env` and the matching literal
+  in `docker-compose.override.yml` (the `redis` service `--requirepass` flag),
+  then update `REDIS_URL` so the password in the DSN matches, then
+  `docker compose up -d redis && docker compose restart worker bot api userbot`.
 
 ## 6. Backup / restore
 
@@ -132,7 +188,38 @@ docker run --rm -v tg-cms_sessiondata:/data -v "$PWD":/backup alpine \
 | Pending posts never normalize | `userbot` logs for `requeued-orphan` | userbot reconciler re-enqueues on boot; check `worker` is healthy |
 | Duplicate publishes | `published_dedupe` lookback | `DEDUPE_LOOKBACK_DAYS` config; publish job is idempotent |
 
-## 8. Monitoring (Prometheus + Grafana)
+## 8. Managing the systemd service
+
+`install.sh` registers `/etc/systemd/system/tg-cms.service`, which runs
+`docker compose up -d --remove-orphans` on boot and `docker compose down` on
+stop. Use standard `systemctl` commands to manage the stack:
+
+```bash
+sudo systemctl status  tg-cms   # show running state
+sudo systemctl stop    tg-cms   # bring the whole stack down
+sudo systemctl start   tg-cms   # bring the stack back up
+sudo systemctl restart tg-cms   # stop then start
+sudo systemctl disable tg-cms   # prevent auto-start on boot
+sudo systemctl enable  tg-cms   # re-enable auto-start on boot
+```
+
+Logs are routed to the system journal:
+
+```bash
+journalctl -u tg-cms -f          # follow the service wrapper logs
+docker compose logs -f            # follow individual container logs
+docker compose logs -f api bot    # follow specific services
+```
+
+If you update `docker-compose.yml` or `.env`, reload the stack without touching
+the systemd unit:
+
+```bash
+docker compose pull               # pull updated images (if any)
+docker compose up -d              # recreate changed containers only
+```
+
+## 9. Monitoring (Prometheus + Grafana)
 
 A ready-to-run observability stack ships in `docker-compose.yml`. It needs no
 Python configuration — Prometheus scrapes the API's `/metrics` endpoint
@@ -167,7 +254,7 @@ Useful signals when triaging the failure cheat-sheet below:
 - `api_http_requests_total` / `api_http_request_duration_seconds` — API traffic
   and latency by route.
 
-## 9. Open configuration (plan §9 defaults)
+## 10. Open configuration (plan §9 defaults)
 
 | Setting | Default | Env var |
 |---|---|---|
