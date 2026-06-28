@@ -62,6 +62,21 @@ async def _send_post(bot: Bot, chat_id: int, text: str, media_refs: list[dict]) 
     text/primary message (None if nothing was sent)."""
     files = [m for m in media_refs if m.get("file") and not m.get("omitted")]
 
+    # Defensive size cap (belt-and-suspenders for cloud mode, where the cap is
+    # 50 MB): userbot/ingest.py already omits oversized media at download time,
+    # but a file on disk from before a tier downgrade could still slip through and
+    # trigger a cryptic Telegram 413. Drop anything over the configured limit.
+    max_size = get_settings().media_max_size_default
+    for m in files:
+        if m.get("size") and m["size"] > max_size:
+            log.warning(
+                "media-oversize-skip-at-send",
+                file=m.get("file"),
+                size=m.get("size"),
+                limit=max_size,
+            )
+    files = [m for m in files if not m.get("size") or m["size"] <= max_size]
+
     if not files:
         msg = await bot.send_message(chat_id, text or " ")
         return msg.message_id

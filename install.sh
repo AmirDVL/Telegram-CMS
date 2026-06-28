@@ -296,6 +296,60 @@ else
     log "Using secrets from existing .env."
 fi
 
+# ── 6.5 Deployment tier (Docker Compose profiles) ─────────────────────────────
+# Selects how much of the stack runs, to fit small hosts. Drives COMPOSE_PROFILES
+# in .env (read automatically by every `docker compose` command).
+echo
+box "━━━ Deployment tier ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Choose how much of the stack to run (saves RAM on small hosts):"
+echo
+echo -e "    ${BOLD}1) minimal${RESET}  — core only: userbot + worker + bot + postgres + redis (~1 GB)"
+echo -e "                 bot-commands-only, cloud Telegram API (50 MB media cap), no web UI / TLS"
+echo -e "    ${BOLD}2) standard${RESET} — core + local Bot API server for ≤2 GB media (~2 GB)"
+echo -e "                 bot-commands-only, no web UI"
+echo -e "    ${BOLD}3) full${RESET}     — everything: web back-office + Prometheus/Grafana (~4 GB)  [default]"
+echo
+
+# On a re-run, default to the tier already recorded in .env (if recognisable).
+TIER_DEFAULT=3
+if [[ -v 'EXISTING_ENV[COMPOSE_PROFILES]' ]]; then
+    case "${EXISTING_ENV[COMPOSE_PROFILES]}" in
+        "")         TIER_DEFAULT=1 ;;
+        largemedia) TIER_DEFAULT=2 ;;
+        *)          TIER_DEFAULT=3 ;;
+    esac
+fi
+
+ask_optional "  Tier [1-3]" TIER_CHOICE "$TIER_DEFAULT"
+
+case "$TIER_CHOICE" in
+    1|minimal)
+        TIER_NAME="minimal"
+        BACKOFFICE_ENABLED=false; OBSERVABILITY_ENABLED=false; LARGEMEDIA_ENABLED=false
+        COMPOSE_PROFILES_VALUE="" ;;
+    2|standard)
+        TIER_NAME="standard"
+        BACKOFFICE_ENABLED=false; OBSERVABILITY_ENABLED=false; LARGEMEDIA_ENABLED=true
+        COMPOSE_PROFILES_VALUE="largemedia" ;;
+    *)
+        TIER_NAME="full"
+        BACKOFFICE_ENABLED=true; OBSERVABILITY_ENABLED=true; LARGEMEDIA_ENABLED=true
+        COMPOSE_PROFILES_VALUE="backoffice,observability,largemedia" ;;
+esac
+
+# Local Bot API server (botapi) only runs in standard/full; otherwise the bot
+# uses the cloud API and we cap media at 50 MB so oversized files are omitted at
+# ingest (userbot/ingest.py) rather than failing the upload.
+if [[ "$LARGEMEDIA_ENABLED" == true ]]; then
+    BOT_API_URL_VALUE="http://botapi:8081"
+    MEDIA_MAX_SIZE_VALUE="2147483648"   # 2 GB
+else
+    BOT_API_URL_VALUE=""
+    MEDIA_MAX_SIZE_VALUE="52428800"     # 50 MB (cloud Telegram limit)
+fi
+
+log "Selected tier: ${TIER_NAME} (COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE:-<none>})"
+
 # ── 7. Interactive prompts for required user-supplied values ──────────────────
 echo
 box "━━━ Telegram configuration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -327,12 +381,19 @@ TG_2FA=$(get_existing TELEGRAM_2FA_PASSWORD "")
 [[ -z "$TG_2FA" ]] && \
     ask_optional_secret "  Userbot 2FA password" TG_2FA
 
-echo
-box "━━━ Web / domain configuration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# The web back-office + TLS reverse proxy only exist in the `backoffice` profile,
+# so the public domain is only relevant there. Skip the prompt otherwise.
+if [[ "$BACKOFFICE_ENABLED" == true ]]; then
+    echo
+    box "━━━ Web / domain configuration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-APP_DOMAIN=$(get_existing APP_DOMAIN "")
-[[ -z "$APP_DOMAIN" || "$APP_DOMAIN" == "cms.example.com" ]] && \
-    ask "  Public domain (e.g. cms.example.com)" APP_DOMAIN
+    APP_DOMAIN=$(get_existing APP_DOMAIN "")
+    [[ -z "$APP_DOMAIN" || "$APP_DOMAIN" == "cms.example.com" ]] && \
+        ask "  Public domain (e.g. cms.example.com)" APP_DOMAIN
+else
+    APP_DOMAIN=$(get_existing APP_DOMAIN "localhost")
+    [[ -n "$APP_DOMAIN" ]] || APP_DOMAIN="localhost"
+fi
 
 echo
 box "━━━ AI Transformation (optional) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -364,6 +425,9 @@ if [[ "$REGENERATE_SECRETS" == true ]]; then
 # ── Compose ───────────────────────────────────────────────────────────────────
 # Pins volume/network names to tg-cms_* (read by docker compose from this file).
 COMPOSE_PROJECT_NAME=tg-cms
+# Active deployment tier. Empty = minimal (core only); largemedia = standard;
+# backoffice,observability,largemedia = full. Edit + re-run install.sh to change.
+COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE}
 
 # ── Telegram (userbot / MTProto) ──────────────────────────────────────────────
 TELEGRAM_API_ID=${TG_API_ID}
@@ -374,8 +438,9 @@ SESSION_DIR=/data/sessions
 MEDIA_DIR=/media
 
 # ── Bot API bot (aiogram) ────────────────────────────────────────────────────
+# BOT_API_SERVER_URL empty = cloud Telegram API (50 MB cap); set = local server.
 BOT_TOKEN=${BOT_TOKEN}
-BOT_API_SERVER_URL=http://botapi:8081
+BOT_API_SERVER_URL=${BOT_API_URL_VALUE}
 BOT_API_SERVER_FILE_PATH=/var/lib/telegram-bot-api
 DESTINATION_CHANNEL_ID=${DEST_CHANNEL}
 EDITOR_GROUP_ID=${EDITOR_GROUP}
@@ -402,7 +467,7 @@ AUDIT_RETENTION_DAYS=90
 MEDIA_RETENTION_DAYS=30
 MAX_CONCURRENT_PUBLISHES=1
 PUBLISH_SPACING_SECONDS=2.0
-MEDIA_MAX_SIZE_DEFAULT=2147483648
+MEDIA_MAX_SIZE_DEFAULT=${MEDIA_MAX_SIZE_VALUE}
 
 # ── Web / API ────────────────────────────────────────────────────────────────
 API_BASE_URL=http://api:8000
@@ -433,6 +498,12 @@ else
     if ! grep -q '^COMPOSE_PROJECT_NAME=' "$ENV_FILE"; then
         printf '\n# Added by install.sh — pins volume/network names to tg-cms_*\nCOMPOSE_PROJECT_NAME=tg-cms\n' >> "$ENV_FILE"
         log "Added COMPOSE_PROJECT_NAME=tg-cms to existing .env."
+    fi
+    # Likewise pin COMPOSE_PROFILES so an upgraded install keeps running the full
+    # stack (preserves pre-profiles behaviour) until the operator opts down.
+    if ! grep -q '^COMPOSE_PROFILES=' "$ENV_FILE"; then
+        printf '\n# Added by install.sh — deployment tier (full preserves prior behaviour)\nCOMPOSE_PROFILES=backoffice,observability,largemedia\n' >> "$ENV_FILE"
+        log "Added COMPOSE_PROFILES=backoffice,observability,largemedia to existing .env."
     fi
 fi
 
@@ -468,24 +539,35 @@ if [[ -f "$OVERRIDE_FILE" ]]; then
     HOST_GRAFANA_PORT=$(extract_host_port "$OVERRIDE_FILE" 3000); HOST_GRAFANA_PORT=${HOST_GRAFANA_PORT:-3001}
     log "Reusing existing port mapping (HTTP=${HOST_HTTP_PORT}, HTTPS=${HOST_HTTPS_PORT}, Grafana=${HOST_GRAFANA_PORT})."
 else
-    resolve_port "HTTP (Caddy)"    80   HOST_HTTP_PORT
-    resolve_port "HTTPS (Caddy)"   443  HOST_HTTPS_PORT
-    resolve_port "Grafana"         3001 HOST_GRAFANA_PORT
+    # Only the profiles that actually publish host ports are checked. Inactive
+    # ones get their defaults so later references stay valid under `set -u`.
+    HOST_HTTP_PORT=80; HOST_HTTPS_PORT=443; HOST_GRAFANA_PORT=3001
+    if [[ "$BACKOFFICE_ENABLED" == true ]]; then
+        resolve_port "HTTP (Caddy)"    80   HOST_HTTP_PORT
+        resolve_port "HTTPS (Caddy)"   443  HOST_HTTPS_PORT
+    else
+        log "Back-office profile off — skipping Caddy port check (no public HTTP/TLS)."
+    fi
+    if [[ "$OBSERVABILITY_ENABLED" == true ]]; then
+        resolve_port "Grafana"         3001 HOST_GRAFANA_PORT
+    else
+        log "Observability profile off — skipping Grafana port check."
+    fi
 fi
 
 # ── 10. Write docker-compose.override.yml ────────────────────────────────────
 log "Writing docker-compose.override.yml..."
 
-# Build port sections only if they were remapped
+# Build port sections only if the profile is active AND the port was remapped.
 CADDY_PORTS_BLOCK=""
-if [[ "$HOST_HTTP_PORT" != "80" || "$HOST_HTTPS_PORT" != "443" ]]; then
+if [[ "$BACKOFFICE_ENABLED" == true && ( "$HOST_HTTP_PORT" != "80" || "$HOST_HTTPS_PORT" != "443" ) ]]; then
     CADDY_PORTS_BLOCK="    ports:
       - \"${HOST_HTTP_PORT}:80\"
       - \"${HOST_HTTPS_PORT}:443\""
 fi
 
 GRAFANA_PORTS_BLOCK=""
-if [[ "$HOST_GRAFANA_PORT" != "3001" ]]; then
+if [[ "$OBSERVABILITY_ENABLED" == true && "$HOST_GRAFANA_PORT" != "3001" ]]; then
     GRAFANA_PORTS_BLOCK="    ports:
       - \"${HOST_GRAFANA_PORT}:3000\""
 fi
@@ -732,10 +814,20 @@ box "  tg-cms installed successfully"
 box "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo
 HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"; HOST_IP="${HOST_IP:-<host-ip>}"
-echo -e "  Web back-office : ${CYAN}https://${APP_DOMAIN}${RESET}"
-echo -e "  API docs        : ${CYAN}https://${APP_DOMAIN}/api/docs${RESET}"
-echo -e "  Grafana         : ${CYAN}http://${HOST_IP}:${HOST_GRAFANA_PORT}${RESET}"
-echo -e "  Admin login     : ${BOLD}admin${RESET} / ${BOLD}${SEED_ADMIN_PASSWORD}${RESET}"
+echo -e "  Deployment tier : ${BOLD}${TIER_NAME}${RESET} (COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE:-<none>})"
+if [[ "$BACKOFFICE_ENABLED" == true ]]; then
+    echo -e "  Web back-office : ${CYAN}https://${APP_DOMAIN}${RESET}"
+    echo -e "  API docs        : ${CYAN}https://${APP_DOMAIN}/api/docs${RESET}"
+    echo -e "  Admin login     : ${BOLD}admin${RESET} / ${BOLD}${SEED_ADMIN_PASSWORD}${RESET}"
+else
+    echo -e "  Management      : ${BOLD}bot commands only${RESET} (no web back-office in this tier)"
+fi
+if [[ "$OBSERVABILITY_ENABLED" == true ]]; then
+    echo -e "  Grafana         : ${CYAN}http://${HOST_IP}:${HOST_GRAFANA_PORT}${RESET}"
+fi
+if [[ "$LARGEMEDIA_ENABLED" != true ]]; then
+    echo -e "  Media           : cloud Telegram API, ${BOLD}50 MB${RESET} upload cap (no local Bot API)"
+fi
 echo
 echo -e "${YELLOW}${BOLD}  ⚠  REQUIRED NEXT STEP — Userbot first-run login (interactive):${RESET}"
 echo

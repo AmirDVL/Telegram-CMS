@@ -48,6 +48,31 @@ NEXT_PUBLIC_API_URL=https://example.com/api
 
 ---
 
+## Deployment Tier
+
+### `COMPOSE_PROFILES`
+
+Comma-separated list of active [Docker Compose profiles](https://docs.docker.com/compose/profiles/),
+which selects how much of the stack runs. Read automatically by every `docker compose`
+command (including `install.sh` and the fleet auto-updater). See [PROFILES.md](PROFILES.md)
+for the full table.
+
+| Value | Tier | Services added beyond core |
+|-------|------|----------------------------|
+| _(empty)_ | `minimal` | none — core only, cloud Bot API (50 MB cap) |
+| `largemedia` | `standard` | `botapi` (local Bot API, ≤2 GB media) |
+| `backoffice,observability,largemedia` | `full` | `api`, `web`, `caddy`, `prometheus`, `grafana`, `botapi` |
+
+Core services (`postgres`, `redis`, `userbot`, `worker`, `bot`) have no profile and
+always run. To change tier on a live host, edit this line and run
+`docker compose up -d --remove-orphans`.
+
+- **Default:** `backoffice,observability,largemedia` (full) when written by `install.sh`
+- **Used by:** docker compose (all services)
+- **Required:** no (empty = minimal tier)
+
+---
+
 ## Database
 
 ### `POSTGRES_DSN`
@@ -202,11 +227,14 @@ Minimum number of seconds between consecutive publish operations. Prevents Teleg
 
 ### `MEDIA_MAX_SIZE_DEFAULT`
 
-Maximum media file size in bytes. Files larger than this limit are skipped during download by the userbot.
+Maximum media file size in bytes. Files larger than this limit are skipped during download by the userbot (and dropped defensively at publish time by the bot).
 
 - **Default:** `2147483648` (2 GiB)
-- **Used by:** userbot, botapi
+- **Used by:** userbot, botapi, bot
 - **Required:** no
+- **Cloud mode:** when the `largemedia` profile is off (no local Bot API server),
+  `install.sh` sets this to `52428800` (50 MiB) to match Telegram's cloud upload cap,
+  so oversized media is omitted at ingest rather than failing the upload.
 
 ---
 
@@ -224,9 +252,14 @@ Telegram Bot API token issued by BotFather. Required to authenticate the aiogram
 
 Base URL of the local Telegram Bot API server. The bot routes all Telegram API calls through this server to bypass the 50 MB cloud upload limit.
 
+**Leave empty to use the cloud API.** When this is empty (the `minimal` tier, where
+the `botapi` container is not started), `bot/client.py` builds a Bot against Telegram's
+hosted API at `api.telegram.org`, which caps uploads at 50 MB. The
+`Settings.use_local_bot_api` property reflects this (`True` when set, `False` when empty).
+
 - **Default:** `http://botapi:8081`
 - **Used by:** bot
-- **Required:** no (default works inside the Docker Compose network)
+- **Required:** no (empty = cloud mode; default works inside the Docker Compose network)
 
 ### `BOT_API_SERVER_FILE_PATH`
 

@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = 30
 
     @property
+    def use_local_bot_api(self) -> bool:
+        """True when a local Bot API server is configured; False = cloud mode.
+
+        Cloud mode (empty ``bot_api_server_url``) is selected by install.sh when
+        the ``largemedia`` profile is off, and implies a 50 MB upload cap.
+        """
+        return bool(self.bot_api_server_url)
+
+    @property
     def cors_origin_list(self) -> list[str]:
         if self.cors_origins.strip() == "*":
             return ["*"]

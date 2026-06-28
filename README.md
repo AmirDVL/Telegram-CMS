@@ -72,6 +72,12 @@ docker compose restart userbot
 Re-running `install.sh` at any time is safe — it is fully idempotent and will
 prompt before touching existing secrets.
 
+**Deployment tiers:** the installer asks which tier to run — `minimal` (core only,
+~1 GB, bot-commands-only via the cloud Telegram API), `standard` (+ local Bot API
+for ≤2 GB media, ~2 GB), or `full` (+ web back-office and Prometheus/Grafana, ~4 GB;
+the default). Tiers are Docker Compose profiles, so you can change one later by
+editing `COMPOSE_PROFILES` in `.env`. See [`docs/PROFILES.md`](docs/PROFILES.md).
+
 **Zero-touch updates:** `install.sh` can optionally install a systemd timer
 that polls the tracked git ref every ~5 minutes, rebuilds, health-gates, and
 auto-rolls back on failure. A canary host tracks `main` and promotes `stable`
@@ -88,6 +94,7 @@ backup/restore.
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, state machine, dedupe, security |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | All environment variables, defaults, required flags |
+| [`docs/PROFILES.md`](docs/PROFILES.md) | Deployment tiers (minimal/standard/full) via Compose profiles for small hosts |
 | [`docs/BOT_GUIDE.md`](docs/BOT_GUIDE.md) | Editor workflow, inline buttons, tags, templates, scheduling |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational procedures, backup/restore, failure handling |
 | [`docs/FLEET_UPDATES.md`](docs/FLEET_UPDATES.md) | Zero-touch fleet updates: topology, canary/production setup, rollback, caveats |

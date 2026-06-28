@@ -27,8 +27,11 @@ services:
       retries: 10
 
   # Local telegram-bot-api server: bypasses the 50 MB cloud upload limit (≤2 GB).
+  # Profile-gated: when `largemedia` is off, the bot falls back to the cloud
+  # Telegram API (50 MB cap) — see bot/client.py.
   botapi:
     image: aiogram/telegram-bot-api:latest
+    profiles: [largemedia]
     restart: unless-stopped
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
@@ -102,8 +105,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      botapi:
-        condition: service_healthy
     command: ["python", "-m", "bot"]
     volumes:
       - media:/media
@@ -119,6 +120,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.python
+    profiles: [backoffice]
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -141,6 +143,7 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+    profiles: [backoffice]
     restart: unless-stopped
     env_file: .env
     environment:
@@ -160,6 +163,7 @@ services:
   # Caddy: reverse proxy + automatic TLS for web + api.
   caddy:
     image: caddy:2-alpine
+    profiles: [backoffice]
     restart: unless-stopped
     ports:
       - "80:80"
@@ -177,12 +181,13 @@ services:
   # Prometheus: scrapes the API /metrics endpoint (HTTP latency + ARQ queue depth).
   prometheus:
     image: prom/prometheus:latest
+    profiles: [observability]
     restart: unless-stopped
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - promdata:/prometheus
-    depends_on:
-      - api
+    # No depends_on api: `observability` and `backoffice` are independent profiles;
+    # a missing scrape target is harmless (Prometheus just reports it down).
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null || exit 1"]
       interval: 15s
@@ -193,6 +198,7 @@ services:
   # Reachable on the host at http://<host>:3001 (admin / GRAFANA_ADMIN_PASSWORD).
   grafana:
     image: grafana/grafana:latest
+    profiles: [observability]
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}

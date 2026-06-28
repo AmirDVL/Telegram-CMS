@@ -227,6 +227,24 @@ docker compose pull               # pull updated images (if any)
 docker compose up -d              # recreate changed containers only
 ```
 
+### Changing the deployment tier
+
+The set of running services is controlled by `COMPOSE_PROFILES` in `.env`
+(see [`PROFILES.md`](PROFILES.md)). To move a host between tiers, edit that line
+and recreate the stack — `--remove-orphans` stops services no longer in the
+active profiles:
+
+```bash
+# e.g. drop the web back-office + metrics to free RAM (full → standard)
+sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=largemedia/' .env
+docker compose up -d --remove-orphans
+```
+
+When moving **off** `largemedia` (no local Bot API server), also set
+`BOT_API_SERVER_URL=` (empty) and `MEDIA_MAX_SIZE_DEFAULT=52428800` so the bot
+uses the cloud API and omits media over 50 MB. Re-running `install.sh` and
+choosing the tier does all of this for you.
+
 ## 9. Fleet updates & rollback
 
 `install.sh` can optionally install a systemd timer that polls the tracked git

@@ -21,11 +21,20 @@ _bot: Bot | None = None
 
 
 def _build_bot(token: str) -> Bot:
-    """Construct a Bot instance connected to the local Bot API server."""
+    """Construct a Bot instance.
+
+    When ``bot_api_server_url`` is configured (the ``largemedia`` deployment
+    profile), the bot talks to the local telegram-bot-api server (≤2 GB uploads).
+    When it is empty (profile off), the bot falls back to Telegram's cloud API at
+    api.telegram.org, which caps uploads at 50 MB — enforced upstream by
+    ``media_max_size_default`` (see bot/publisher.py and userbot/ingest.py).
+    """
     s = get_settings()
-    server = TelegramAPIServer.from_base(s.bot_api_server_url, is_local=True)
-    session = AiohttpSession(api=server)
-    return Bot(token=token, session=session, default=_PROPS)
+    if s.bot_api_server_url:
+        server = TelegramAPIServer.from_base(s.bot_api_server_url, is_local=True)
+        session = AiohttpSession(api=server)
+        return Bot(token=token, session=session, default=_PROPS)
+    return Bot(token=token, default=_PROPS)
 
 
 def get_bot() -> Bot:

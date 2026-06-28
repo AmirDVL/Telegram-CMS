@@ -25,10 +25,16 @@ POLL_INTERVAL=5
 # exported by auto-update.sh). Fall back to "docker compose" for standalone use.
 DC_EXEC="${DC_EXEC:-docker compose}"
 
-# ── Services that have a healthcheck in docker-compose.yml ───────────────────
-# These must reach "healthy" status. If docker reports "none", we treat the
-# service as pass-through (no healthcheck defined), checking only "running".
-EXPECTED_SERVICES=(postgres redis botapi worker userbot bot api web)
+# ── Services we expect to be running, derived from the active Compose profiles ─
+# `docker compose config --services` honors COMPOSE_PROFILES from the .env in the
+# current directory, so this auto-adapts to the host's deployment tier (minimal /
+# standard / full). Services with a healthcheck must reach "healthy"; those
+# without one only need to be "running".
+mapfile -t EXPECTED_SERVICES < <($DC_EXEC config --services 2>/dev/null)
+if [[ ${#EXPECTED_SERVICES[@]} -eq 0 ]]; then
+    # Fallback if `config --services` is unavailable (older Compose): assume core.
+    EXPECTED_SERVICES=(postgres redis worker userbot bot)
+fi
 
 log "Health gate: waiting up to ${TIMEOUT}s for all services to be healthy..."
 
