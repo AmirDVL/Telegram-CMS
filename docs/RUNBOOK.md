@@ -132,7 +132,42 @@ docker run --rm -v tg-cms_sessiondata:/data -v "$PWD":/backup alpine \
 | Pending posts never normalize | `userbot` logs for `requeued-orphan` | userbot reconciler re-enqueues on boot; check `worker` is healthy |
 | Duplicate publishes | `published_dedupe` lookback | `DEDUPE_LOOKBACK_DAYS` config; publish job is idempotent |
 
-## 8. Open configuration (plan §9 defaults)
+## 8. Monitoring (Prometheus + Grafana)
+
+A ready-to-run observability stack ships in `docker-compose.yml`. It needs no
+Python configuration — Prometheus scrapes the API's `/metrics` endpoint
+internally (`api:8000/metrics`, config in `observability/prometheus.yml`).
+
+**Grafana** is published on host port `3001`:
+
+```
+http://<host>:3001        # user: admin  /  password: GRAFANA_ADMIN_PASSWORD (default: admin)
+```
+
+On first boot it is auto-provisioned with:
+
+- a Prometheus datasource (`observability/grafana/provisioning/datasources/`), and
+- an overview dashboard (`observability/grafana/dashboards/tg-cms-overview.json`).
+
+Change the default Grafana password before exposing port `3001` (set
+`GRAFANA_ADMIN_PASSWORD` in `.env` and `docker compose up -d grafana`).
+
+**Prometheus** has no published port; query it inside the network only:
+
+```bash
+docker compose exec prometheus wget -qO- http://localhost:9090/-/healthy
+# queue depth directly from the API's /metrics:
+docker compose exec api wget -qO- http://localhost:8000/metrics | grep arq_queue_depth
+```
+
+Useful signals when triaging the failure cheat-sheet below:
+
+- `arq_queue_depth{queue="worker"}` / `{queue="bot"}` rising — jobs piling up
+  (worker or bot stuck / down).
+- `api_http_requests_total` / `api_http_request_duration_seconds` — API traffic
+  and latency by route.
+
+## 9. Open configuration (plan §9 defaults)
 
 | Setting | Default | Env var |
 |---|---|---|

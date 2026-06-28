@@ -84,6 +84,7 @@ Async FastAPI application using SQLAlchemy 2.0 async + asyncpg.
 - **Endpoints:** queue management, audit log, CRUD for tags, templates, source channels, and admin users.
 - **Passwords:** hashed with Argon2 (argon2-cffi); automatically rehashed on login if the stored parameters are outdated.
 - **Health:** `GET /healthz` on port 8000.
+- **Metrics:** `GET /metrics` (Prometheus exposition format, `include_in_schema=False`). Exposes `api_http_requests_total`, `api_http_request_duration_seconds`, and `arq_queue_depth` (see [Observability](#observability)). Redis is optional at scrape time — an unreachable broker yields a queue depth of `0` rather than failing the scrape.
 
 ---
 
@@ -114,6 +115,25 @@ Runs the official Telegram Bot API server locally. Bypasses the 50 MB cloud uplo
 ### caddy (Caddy 2)
 
 Reverse proxy with automatic TLS. Routes public HTTPS traffic to the `api` and `web` services.
+
+---
+
+### prometheus (Prometheus)
+
+Scrapes the API's `/metrics` endpoint every 15s (config in
+`observability/prometheus.yml`, target `api:8000`). No host port is published —
+it is reachable only inside the Compose network. Stores samples in the
+`promdata` volume.
+
+---
+
+### grafana (Grafana)
+
+Visualization layer. Provisioned on boot with a Prometheus datasource
+(`observability/grafana/provisioning/datasources/`) and an overview dashboard
+(`observability/grafana/dashboards/`). Published on host port `3001`; admin
+password is `GRAFANA_ADMIN_PASSWORD` (default `admin`). State persists in the
+`grafanadata` volume.
 
 ---
 
@@ -277,6 +297,27 @@ All services emit structured JSON logs via `structlog`. Every log event is tagge
 | userbot | 8084 | `/healthz` |
 
 All four endpoints are probed by Docker healthchecks.
+
+### Observability
+
+The API exposes a Prometheus `/metrics` endpoint (`api/metrics.py`) scraped by
+the `prometheus` service. Three metric families are exported:
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `api_http_requests_total` | counter | `method`, `route`, `status` | Total HTTP requests handled by the API |
+| `api_http_request_duration_seconds` | histogram | `method`, `route` | HTTP request latency in seconds |
+| `arq_queue_depth` | gauge | `queue` (`worker`, `bot`) | ARQ jobs awaiting pickup per queue (`ZCARD` of the queue sorted set) |
+
+Design notes:
+
+- The `route` label is the matched route **template** (e.g. `/queue/{post_id}`),
+  not the raw URL, to keep label cardinality bounded; unmatched paths collapse to
+  `unmatched`.
+- `/metrics`, `/healthz`, `/openapi.json`, and `/docs` are exempt from
+  instrumentation (avoids noise and self-recursion on `/metrics`).
+- The queue gauge is best-effort: if Redis is unreachable the gauge serves `0`
+  and the HTTP metrics are still returned, so scraping can never break the API.
 
 ### ARQ connection pool
 

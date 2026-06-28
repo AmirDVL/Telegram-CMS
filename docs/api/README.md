@@ -70,6 +70,7 @@ A higher role includes all permissions of lower roles.
 | Admins | `/api/admins` | [admins.md](admins.md) |
 | Audit log | `/api/audit` | [audit.md](audit.md) |
 | Health | `/api/healthz` | — |
+| Metrics | `/api/metrics` | — (Prometheus exposition; see [ARCHITECTURE.md](../ARCHITECTURE.md#observability)) |
 
 ## Health check
 
@@ -84,3 +85,17 @@ Response 200:
 ```
 
 No authentication required. Probed by Docker healthcheck every 15 seconds.
+
+## Metrics
+
+```
+GET /api/metrics
+```
+
+Prometheus exposition format (not in the OpenAPI schema). No authentication
+required. Returns the `api_http_requests_total`,
+`api_http_request_duration_seconds`, and `arq_queue_depth` metric families.
+Scraped internally by the `prometheus` service every 15s — see
+[ARCHITECTURE.md → Observability](../ARCHITECTURE.md#observability) for the full
+metric reference. The scrape is best-effort: an unreachable Redis yields a queue
+depth of `0` rather than an error.

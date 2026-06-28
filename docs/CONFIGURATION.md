@@ -312,6 +312,30 @@ Publicly accessible base URL of the API, used by the browser-side Next.js code. 
 
 ---
 
+## Observability
+
+The observability stack (Prometheus + Grafana) is shipped in `docker-compose.yml`
+and requires no Python-side settings. The single variable below configures the
+Grafana container only — it is **not** read by any Python service.
+
+### `GRAFANA_ADMIN_PASSWORD`
+
+Initial admin password for the Grafana container, surfaced as
+`GF_SECURITY_ADMIN_PASSWORD`. Grafana is published on host port `3001` (see
+[`RUNBOOK.md`](RUNBOOK.md#8-monitoring-prometheus--grafana)).
+
+- **Default:** `admin`
+- **Used by:** grafana container only
+- **Required in production:** yes — change the default `admin`/`admin`
+  credentials before exposing port `3001`
+
+> The Prometheus service needs no configuration: it scrapes the API's
+> `/metrics` endpoint internally (`api:8000/metrics`) using the job defined in
+> `observability/prometheus.yml`. The `prometheus-client` dependency is declared
+> in `pyproject.toml`.
+
+---
+
 ## Internal
 
 These ports are only used for Docker healthcheck probes and are not exposed publicly.

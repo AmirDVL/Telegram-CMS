@@ -102,7 +102,8 @@ and `bot` queues. A ready-to-run stack ships in `docker-compose.yml`:
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `ruff` (lint) and `pytest` on
 every push and pull request. Tests mock the Telegram-publishing boundary (ARQ
-enqueue) and exercise the deduplication logic in `shared/dedupe.py` — no
+enqueue) and cover the deduplication logic (`shared/dedupe.py`), normalize
+routing (`worker/normalize.py`), and a `/metrics` endpoint smoke test — no
 Postgres/Redis required.
 
 ## Linking Telegram accounts for bot inline buttons
