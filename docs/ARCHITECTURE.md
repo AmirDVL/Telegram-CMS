@@ -348,3 +348,25 @@ A process-wide shared ARQ pool is used by each service. The pool is automaticall
 |---|---|---|
 | Media volume | userbot (download) | bot (publish) |
 | Session volume | userbot | worker (Telethon `.session` file) |
+
+## Future / Deferred Enhancements
+
+### Source IP protection (deferred)
+
+The Python services currently ship as plain `.py` source: images are built
+**on each client host** (`build:` in `docker-compose.yml`), and the zero-touch
+fleet updater (`fleet/auto-update.sh`) does `git fetch` + `docker compose build`
+on the client. This means every client receives the full source.
+
+A future hardening pass could obfuscate the core logic by **compiling it with
+Cython/Nuitka** (`.py` → `.so` C extensions) via an opt-in multi-stage
+`Dockerfile.python` (`ARG COMPILE_SOURCE=1`). Note this only raises the
+reverse-engineering cost — it is obfuscation, not DRM.
+
+**Important coupling:** compilation only protects source if clients no longer
+build from source. Realising it therefore also means changing the **distribution
+model** — pre-building (compiled) images in CI and shipping them via a **private
+registry** that clients pull with read-only deploy tokens, rather than the current
+build-on-host git-poll flow. The two are a single piece of work: compiling locally
+while still handing clients the source achieves nothing. Treat this as a
+distribution-model change, not just a Dockerfile edit, if it is ever picked up.
