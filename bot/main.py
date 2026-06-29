@@ -15,6 +15,7 @@ from aiogram import Bot, Dispatcher
 from arq.connections import RedisSettings
 from arq.worker import create_worker
 
+from bot.alerts import alert
 from bot.client import get_bot
 from bot.draft import post_draft
 from bot.handlers import admin_router, callback_router
@@ -28,7 +29,7 @@ log = get_logger("bot")
 
 
 class BotWorkerSettings:
-    functions = [publish, post_draft]
+    functions = [publish, post_draft, alert]
     queue_name = QUEUE_BOT
     redis_settings: RedisSettings = redis_settings()
     max_jobs = get_settings().max_concurrent_publishes

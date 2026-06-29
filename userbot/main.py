@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from telethon import TelegramClient, events
@@ -20,6 +21,19 @@ from userbot.ingest import ingest_message, last_ingested_message_id, reconcile_p
 log = get_logger("userbot")
 
 _BACKFILL_LIMIT = 200
+
+# ── MTProto liveness state ────────────────────────────────────────────────────
+# Updated by the watchdog task; read by the health-check closure.
+_mtproto_connected: bool = False
+_mtproto_authorized: bool = False
+_mtproto_last_ok: datetime | None = None  # timezone-aware (UTC)
+_mtproto_failure_count: int = 0
+_mtproto_failure_reason: str = ""
+
+# Watchdog configuration.
+_WATCHDOG_INTERVAL_SECONDS: int = 30
+# A last_ok older than this threshold is considered stale (3x interval).
+_WATCHDOG_STALE_SECONDS: int = _WATCHDOG_INTERVAL_SECONDS * 3  # 90 s
 
 
 async def load_channels() -> list[SourceChannel]:
@@ -64,6 +78,120 @@ async def backfill(client: TelegramClient, channel: SourceChannel, entity) -> No
         log.info("backfilled", channel_id=channel.id, count=count)
 
 
+def _is_mtproto_healthy() -> tuple[bool, str]:
+    """Return (healthy, reason) based on current module-level liveness state."""
+    global _mtproto_connected, _mtproto_authorized, _mtproto_last_ok, _mtproto_failure_reason
+
+    if not _mtproto_connected:
+        return False, "disconnected"
+    if not _mtproto_authorized:
+        return False, "unauthorized"
+    if _mtproto_last_ok is None:
+        return False, "never_checked"
+    age = (datetime.now(UTC) - _mtproto_last_ok).total_seconds()
+    if age > _WATCHDOG_STALE_SECONDS:
+        reason = _mtproto_failure_reason or "stale"
+        return False, f"stale:{age:.0f}s ({reason})"
+    return True, "ok"
+
+
+async def _mtproto_check() -> tuple[bool, str]:
+    """Extra health check passed to start_health_server."""
+    ok, detail = _is_mtproto_healthy()
+    return ok, detail
+
+
+async def _watchdog(client: TelegramClient) -> None:
+    """Periodically probe the MTProto connection and enqueue alerts on transitions."""
+    global _mtproto_connected, _mtproto_authorized, _mtproto_last_ok
+    global _mtproto_failure_count, _mtproto_failure_reason
+
+    # Import here to avoid circular issues at module-load time.
+    from shared.tasks import enqueue_alert
+
+    was_healthy: bool | None = None  # None = first cycle, no prior state
+
+    while True:
+        await asyncio.sleep(_WATCHDOG_INTERVAL_SECONDS)
+
+        connected = False
+        authorized = False
+        reason = ""
+
+        try:
+            connected = client.is_connected()
+            _mtproto_connected = connected
+
+            if connected:
+                authorized = await client.is_user_authorized()
+                _mtproto_authorized = authorized
+
+            if connected and authorized:
+                # Full RPC round-trip to confirm the session is genuinely alive.
+                await client.get_me()
+                _mtproto_last_ok = datetime.now(UTC)
+                _mtproto_failure_count = 0
+                _mtproto_failure_reason = ""
+            else:
+                reason = "disconnected" if not connected else "unauthorized"
+                _mtproto_failure_count += 1
+                _mtproto_failure_reason = reason
+                log.warning(
+                    "mtproto-watchdog-unhealthy",
+                    connected=connected,
+                    authorized=authorized,
+                    failures=_mtproto_failure_count,
+                )
+
+        except FloodWaitError as exc:
+            reason = f"floodwait:{exc.seconds}s"
+            _mtproto_failure_count += 1
+            _mtproto_failure_reason = reason
+            log.warning("mtproto-watchdog-floodwait", seconds=exc.seconds, failures=_mtproto_failure_count)
+
+        except asyncio.CancelledError:
+            raise  # Let cancellation propagate cleanly.
+
+        except Exception as exc:
+            reason = f"{type(exc).__name__}"
+            _mtproto_failure_count += 1
+            _mtproto_failure_reason = reason
+            log.warning(
+                "mtproto-watchdog-error",
+                error=str(exc),
+                exc_type=reason,
+                failures=_mtproto_failure_count,
+            )
+
+        # ── Edge-triggered alerting ───────────────────────────────────────────
+        now_healthy, detail = _is_mtproto_healthy()
+
+        if was_healthy is None:
+            # First cycle: just record state, do not alert (it was just started).
+            was_healthy = now_healthy
+            continue
+
+        if was_healthy and not now_healthy:
+            # Healthy → unhealthy transition.
+            alert_text = f"⚠️ Userbot MTProto session unhealthy: {detail}"
+            log.warning("mtproto-alert-unhealthy", detail=detail)
+            try:
+                await enqueue_alert(alert_text)
+            except Exception:
+                log.exception("mtproto-alert-enqueue-failed")
+
+        elif not was_healthy and now_healthy:
+            # Unhealthy → healthy transition (recovery).
+            alert_text = "✅ Userbot MTProto session recovered and is healthy again."
+            log.info("mtproto-alert-recovered")
+            try:
+                await enqueue_alert(alert_text)
+            except Exception:
+                log.exception("mtproto-alert-enqueue-failed")
+
+        was_healthy = now_healthy
+
+
 async def run() -> None:
     configure_logging("userbot")
     settings = get_settings()
@@ -75,7 +203,17 @@ async def run() -> None:
     me = await client.get_me()
     log.info("userbot-connected", account=getattr(me, "username", None) or getattr(me, "id", None))
 
-    health = start_health_server("userbot", settings.userbot_health_port)
+    # Initialise liveness state now that we know we are connected.
+    global _mtproto_connected, _mtproto_authorized, _mtproto_last_ok
+    _mtproto_connected = client.is_connected()
+    _mtproto_authorized = True  # just confirmed by client.start() + get_me()
+    _mtproto_last_ok = datetime.now(UTC)
+
+    health = start_health_server(
+        "userbot",
+        settings.userbot_health_port,
+        extra_checks={"mtproto": _mtproto_check},
+    )
 
     try:
         orphans = await reconcile_pending()
@@ -118,12 +256,14 @@ async def run() -> None:
         except NotImplementedError:  # Windows
             pass
 
+    watchdog = asyncio.create_task(_watchdog(client), name="mtproto-watchdog")
     task = asyncio.create_task(client.run_until_disconnected())
     _, pending = await asyncio.wait(
         {task, asyncio.create_task(stop.wait())}, return_when=asyncio.FIRST_COMPLETED
     )
     for t in pending:
         t.cancel()
+    watchdog.cancel()
     health.cancel()
     await client.disconnect()
     log.info("userbot-stopped")

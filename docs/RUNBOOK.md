@@ -189,6 +189,7 @@ docker run --rm -v tg-cms_sessiondata:/data -v "$PWD":/backup alpine \
 | Symptom | Check | Fix |
 |---|---|---|
 | Posts not arriving | `userbot` logs + `healthz` | account joined channel? session valid? `docker compose restart userbot` |
+| **Userbot unhealthy / MTProto session invalid** (flood ban, 2FA/ToS change, account kicked) | `curl -s http://localhost:8084/healthz \| jq .checks.mtproto` — shows `disconnected`, `unauthorized`, `stale`, or `floodwait` | Re-run the interactive login: `docker compose stop userbot && docker compose run --rm -it userbot python -m userbot.login && docker compose start userbot` (see §4). An alert was already sent to the editor group on session loss. |
 | Draft cards missing | `bot` logs + editor group id | `EDITOR_GROUP_ID` set + bot admin of group |
 | Inline Approve/Reject buttons silently rejected | `bot` logs for `callback-unlinked-user` | admin's `tg_user_id` not set — link via web back-office → Admins |
 | Publish stuck / failed | `post_events` `publish_failed` + `botapi` health | local Bot API server up? `docker compose restart botapi bot` |

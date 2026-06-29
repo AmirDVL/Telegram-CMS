@@ -26,6 +26,7 @@ JOB_NORMALIZE = "normalize"
 JOB_PUBLISH = "publish"
 JOB_POST_DRAFT = "post_draft"
 JOB_PRUNE_DEDUPE = "prune_dedupe"
+JOB_ALERT = "alert"
 
 # ── Queues ───────────────────────────────────────────────────────────────────
 QUEUE_WORKER = "arq:queue:worker"
@@ -81,6 +82,16 @@ async def enqueue_post_draft(post_id: int) -> Job | None:
 
 async def enqueue_prune_dedupe() -> Job | None:
     return await enqueue_job(JOB_PRUNE_DEDUPE, queue=QUEUE_WORKER)
+
+
+async def enqueue_alert(text: str, *, tenant_id: int | None = None) -> Job | None:
+    """Enqueue an alert message to be sent by the bot to the editor group.
+
+    The ``alert`` consumer in ``bot/alerts.py`` picks this up from ``QUEUE_BOT``.
+    ``tenant_id`` is forwarded so the bot can resolve the correct editor group
+    and bot token in multi-tenant deployments.
+    """
+    return await enqueue_job(JOB_ALERT, text, queue=QUEUE_BOT, tenant_id=tenant_id)
 
 
 async def queued_job_count(queue: str) -> int:

@@ -294,14 +294,28 @@ All services emit structured JSON logs via `structlog`. Every log event is tagge
 
 ### Health endpoints
 
-| Service | Port | Path |
-|---|---|---|
-| api | 8000 | `/healthz` |
-| bot | 8082 | `/healthz` |
-| worker | 8083 | `/healthz` |
-| userbot | 8084 | `/healthz` |
+| Service | Port | Path | Extra checks |
+|---|---|---|---|
+| api | 8000 | `/healthz` | — |
+| bot | 8082 | `/healthz` | — |
+| worker | 8083 | `/healthz` | — |
+| userbot | 8084 | `/healthz` | `mtproto` — connected + authorized + fresh RPC |
 
 All four endpoints are probed by Docker healthchecks.
+
+The userbot's `/healthz` response includes an `mtproto` field in the `checks`
+object.  It reflects the real health of the MTProto session:
+
+- `"ok"` — Telethon reports connected + authorized, and `get_me()` succeeded
+  within the last 90 s (3× the 30 s watchdog interval).
+- A failure detail string (e.g. `"disconnected"`, `"unauthorized"`,
+  `"stale:95s (floodwait:30s)"`) — when the MTProto session is unhealthy the
+  endpoint returns HTTP 503 and overall `"status": "degraded"`.
+
+On a **healthy → unhealthy** transition the watchdog enqueues an `alert` job on
+`QUEUE_BOT`; the bot's ARQ worker picks it up and sends the message to the
+editor supergroup.  A **recovery** (unhealthy → healthy) also triggers an alert.
+Alerting is edge-triggered (one message per transition, not every 30 s).
 
 ### Observability
 
