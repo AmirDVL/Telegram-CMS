@@ -42,7 +42,7 @@ from shared.db import SessionLocal
 from shared.enums import EventAction, PostState
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, PublishedDedupe, SourceChannel
-from shared.tenant import get_tenant_for_channel
+from shared.tenant import effective, get_tenant_for_channel
 
 log = get_logger("bot.publish")
 
@@ -139,20 +139,27 @@ async def _dedupe_exists(dedupe_hash: str) -> bool:
         return found is not None
 
 
-async def _reserve_dedupe(dedupe_hash: str | None) -> bool:
+async def _reserve_dedupe(dedupe_hash: str | None, tenant_id: int | None = None) -> bool:
     """Pre-insert a PublishedDedupe row as a send reservation before the Telegram send.
 
     Returns True if the reservation was newly created (safe to proceed).
     Returns False if the row already existed — another job won the race.
     When dedupe_hash is None, returns True unconditionally (nothing to reserve).
+
+    ``tenant_id`` is stamped onto the row so that per-tenant dedupe queries
+    (in normalize._is_duplicate) can filter by tenant.  When multi-tenancy is
+    off tenant_id is None and the column stays NULL — unchanged behaviour.
     """
     if not dedupe_hash:
         return True
     async with SessionLocal() as session:
+        values: dict = {"dedupe_hash": dedupe_hash}
+        if tenant_id is not None:
+            values["tenant_id"] = tenant_id
         result = await session.execute(
             pg_insert(PublishedDedupe)
-            .values(dedupe_hash=dedupe_hash)
-            .on_conflict_do_nothing(index_elements=["dedupe_hash"])
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["tenant_id", "dedupe_hash"])
             .returning(PublishedDedupe.dedupe_hash)
         )
         await session.commit()
@@ -213,7 +220,7 @@ async def _mark_published(post_id: int, message_id: int, dedupe_hash: str | None
             session.add(
                 pg_insert(PublishedDedupe)
                 .values(dedupe_hash=dedupe_hash)
-                .on_conflict_do_nothing(index_elements=["dedupe_hash"])
+                .on_conflict_do_nothing(index_elements=["tenant_id", "dedupe_hash"])
             )
         await session.commit()
 
@@ -287,9 +294,23 @@ async def _publish_core(ctx: dict, post_id: int) -> str:
     async with SessionLocal() as session:
         tenant = await get_tenant_for_channel(session, post.source_channel_id) if tenant_id else None
     if tenant is not None:
+        # Defensive sanity check: the tenant we resolved must match the post's
+        # own tenant_id.  A mismatch would only occur if channel.tenant_id was
+        # updated between ingest and publish — treat it as a data-integrity
+        # warning rather than a hard failure so the post is not silently dropped.
+        if tenant_id is not None and tenant.id != tenant_id:
+            log.warning(
+                "tenant-mismatch",
+                post_id=post_id,
+                post_tenant_id=tenant_id,
+                channel_tenant_id=tenant.id,
+            )
         if tenant.destination_channel_id:
             dest_channel_id = tenant.destination_channel_id
         bot = get_bot_for_tenant(tenant.id, tenant.bot_token)
+
+    # Resolve publish spacing — per-tenant override takes priority over global.
+    spacing = effective("publish_spacing_seconds", tenant)
 
     # Pre-send dedupe re-check: a concurrent publish of identical content may
     # have already won (the lookback row now exists). Skip instead of double-posting.
@@ -302,7 +323,8 @@ async def _publish_core(ctx: dict, post_id: int) -> str:
     # later fails, the row persists so any ARQ retry will find _dedupe_exists() True
     # and mark the post duplicate rather than re-sending it. If the Telegram send
     # itself fails, we remove the reservation so the next retry can try again.
-    if dedupe_hash and not await _reserve_dedupe(dedupe_hash):
+    # Stamp tenant_id on the reservation so per-tenant dedupe queries work correctly.
+    if dedupe_hash and not await _reserve_dedupe(dedupe_hash, tenant_id):
         log.info("duplicate-at-publish-race", post_id=post_id)
         await _mark_duplicate(post_id, dedupe_hash)
         return "duplicate"
@@ -313,7 +335,7 @@ async def _publish_core(ctx: dict, post_id: int) -> str:
     message_id: int | None = None
     try:
         async with _send_lock:
-            await asyncio.sleep(settings.publish_spacing_seconds)
+            await asyncio.sleep(spacing)
             try:
                 message_id = await _send_post(
                     bot, dest_channel_id, normalized_text, media_refs

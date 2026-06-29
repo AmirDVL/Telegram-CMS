@@ -15,7 +15,7 @@ from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin
 from shared.security import hash_password
-from shared.tenant import scope_query, stamp_tenant
+from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 router = APIRouter(prefix="/admins", tags=["admins"])
 
@@ -65,8 +65,9 @@ async def update_admin(
     payload: AdminUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.super_admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Admin:
-    admin = await session.get(Admin, admin_id)
+    admin = await get_scoped(session, Admin, admin_id, tenant_id)
     if admin is None:
         raise HTTPException(status_code=404, detail="admin not found")
     if payload.password is not None:

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { useEffect, useState } from "react";
+import { fetchMeta } from "@/lib/api";
 
 const LINKS = [
   { href: "/queue", label: "Queue" },
@@ -16,6 +18,16 @@ const LINKS = [
 export function Nav() {
   const pathname = usePathname();
   const { admin, logout } = useAuth();
+  const [showTenants, setShowTenants] = useState(false);
+
+  useEffect(() => {
+    if (admin?.role === "super_admin") {
+      fetchMeta()
+        .then((meta) => setShowTenants(meta.multi_tenancy_enabled))
+        .catch(() => {});
+    }
+  }, [admin]);
+
   return (
     <nav className="flex items-center gap-1 border-b border-slate-200 bg-white px-4 py-2">
       <span className="mr-4 font-bold text-slate-800">TG CMS</span>
@@ -32,6 +44,18 @@ export function Nav() {
           {l.label}
         </Link>
       ))}
+      {showTenants && (
+        <Link
+          href="/tenants"
+          className={`rounded px-3 py-1 text-sm ${
+            pathname === "/tenants"
+              ? "bg-slate-800 text-white"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          Tenants
+        </Link>
+      )}
       <div className="ml-auto flex items-center gap-3 text-sm text-slate-500">
         {admin && (
           <span>

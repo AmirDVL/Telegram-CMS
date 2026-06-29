@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -67,6 +68,15 @@ class Tenant(Base):
     watermark_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     watermark_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     strip_source_tags: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Per-tenant config overrides (NULL = use global setting from Settings).
+    # These allow each tenant to override the system-wide defaults without
+    # touching global environment variables.
+    ai_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ai_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dedupe_lookback_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    publish_spacing_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    media_max_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -254,11 +264,16 @@ class PostEvent(Base):
 
 class PublishedDedupe(Base):
     __tablename__ = "published_dedupe"
-
-    dedupe_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id"), nullable=True, index=True
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dedupe_hash", postgresql_nulls_not_distinct=True),
     )
+
+    # Composite unique constraint above acts as the logical PK. SQLAlchemy requires
+    # a mapped PK column for ORM operations, so we use tenant_id + dedupe_hash jointly.
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id"), nullable=True, primary_key=True
+    )
+    dedupe_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

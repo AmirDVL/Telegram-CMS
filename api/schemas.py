@@ -279,6 +279,13 @@ class TenantOut(BaseModel):
     watermark_enabled: bool = False
     watermark_text: str | None = None
     strip_source_tags: bool = False
+    # Per-tenant config overrides (None = use global Settings value).
+    ai_model: str | None = None
+    ai_max_tokens: int | None = None
+    ai_timeout_seconds: int | None = None
+    dedupe_lookback_days: int | None = None
+    publish_spacing_seconds: float | None = None
+    media_max_size_bytes: int | None = None
     created_at: datetime
     disabled_at: datetime | None = None
 
@@ -297,6 +304,13 @@ class TenantCreate(BaseModel):
     watermark_enabled: bool = False
     watermark_text: str | None = None
     strip_source_tags: bool = False
+    # Per-tenant config overrides (None = use global Settings value).
+    ai_model: str | None = None
+    ai_max_tokens: int | None = None
+    ai_timeout_seconds: int | None = None
+    dedupe_lookback_days: int | None = None
+    publish_spacing_seconds: float | None = None
+    media_max_size_bytes: int | None = None
 
 
 class TenantUpdate(BaseModel):
@@ -312,4 +326,11 @@ class TenantUpdate(BaseModel):
     watermark_enabled: bool | None = None
     watermark_text: str | None = None
     strip_source_tags: bool | None = None
+    # Per-tenant config overrides (None = use global Settings value).
+    ai_model: str | None = None
+    ai_max_tokens: int | None = None
+    ai_timeout_seconds: int | None = None
+    dedupe_lookback_days: int | None = None
+    publish_spacing_seconds: float | None = None
+    media_max_size_bytes: int | None = None
     disabled: bool | None = None

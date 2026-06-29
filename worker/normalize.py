@@ -26,20 +26,27 @@ from shared.logging import get_logger
 from shared.models import Post, PostEvent, PublishedDedupe, SourceChannel, Template
 from shared.normalize import DEFAULT_TEMPLATE_BODY, normalize_text
 from shared.tasks import enqueue_post_draft, enqueue_publish
+from shared.tenant import effective, get_tenant_for_channel
 from shared.transform import AITransformError, apply_watermark, transform_text
 
 log = get_logger("worker.normalize")
 
 
-async def _is_duplicate(session, dedupe_hash: str) -> bool:
-    settings = get_settings()
-    cutoff = datetime.now(UTC) - timedelta(days=settings.dedupe_lookback_days)
-    existing = await session.scalar(
-        select(PublishedDedupe).where(
-            PublishedDedupe.dedupe_hash == dedupe_hash,
-            PublishedDedupe.published_at >= cutoff,
-        )
+async def _is_duplicate(session, dedupe_hash: str, tenant=None) -> bool:
+    """Check whether this hash was published recently, scoped to the tenant.
+
+    When multi-tenancy is off (the default) ``tenant`` is always ``None`` and
+    the query is unscoped — identical to the previous behaviour.
+    """
+    lookback_days = effective("dedupe_lookback_days", tenant)
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+    stmt = select(PublishedDedupe).where(
+        PublishedDedupe.dedupe_hash == dedupe_hash,
+        PublishedDedupe.published_at >= cutoff,
     )
+    if tenant is not None:
+        stmt = stmt.where(PublishedDedupe.tenant_id == tenant.id)
+    existing = await session.scalar(stmt)
     return existing is not None
 
 
@@ -74,6 +81,10 @@ async def normalize(ctx: dict, post_id: int) -> str:
             log.error("source-channel-missing", post_id=post_id)
             return "no_channel"
 
+        # Resolve the tenant for this channel — None when multi-tenancy is off
+        # or the channel has no tenant_id (single-tenant mode, always None).
+        tenant = await get_tenant_for_channel(session, channel.id)
+
         template_body = DEFAULT_TEMPLATE_BODY
         if channel.normalization_template_id:
             tpl = await session.get(Template, channel.normalization_template_id)
@@ -92,8 +103,16 @@ async def normalize(ctx: dict, post_id: int) -> str:
         )
 
         # ── AI Transformation (toggle-controlled) ────────────────────────
+        # Channel-level settings take precedence; tenant defaults serve as a
+        # fallback when channel hasn't explicitly overridden them (only relevant
+        # when multi-tenancy is on; tenant is None otherwise so effective()
+        # falls through to global Settings — unchanged behaviour).
         final_text = normalized
         if _should_ai_transform(channel):
+            # Resolve per-tenant AI overrides (NULL tenant → global settings).
+            ai_model = effective("ai_model", tenant)
+            ai_max_tokens = effective("ai_max_tokens", tenant)
+            ai_timeout = effective("ai_timeout_seconds", tenant)
             try:
                 result = await transform_text(
                     normalized,
@@ -101,6 +120,9 @@ async def normalize(ctx: dict, post_id: int) -> str:
                     target_language=channel.ai_target_language,
                     tone_prompt=channel.ai_tone_prompt,
                     custom_system_prompt=channel.ai_custom_system_prompt,
+                    model=ai_model,
+                    max_tokens=ai_max_tokens,
+                    timeout=ai_timeout,
                 )
                 final_text = result.text
                 post.ai_transformed_text = result.text
@@ -135,10 +157,24 @@ async def normalize(ctx: dict, post_id: int) -> str:
                 # Fall back to un-transformed text — the post still flows through.
 
         # ── Watermark / branding (no LLM, always runs if configured) ─────
+        # Prefer the channel's own watermark settings; when the channel has
+        # watermark disabled but the tenant has one configured, apply the tenant
+        # default.  When multi-tenancy is off tenant is None so effective()
+        # falls through to Settings — the global watermark_text is never set
+        # there, meaning this is a true no-op in single-tenant mode.
+        wm_enabled = channel.watermark_enabled or (
+            tenant is not None and tenant.watermark_enabled and not channel.watermark_enabled
+        )
+        wm_text = channel.watermark_text if channel.watermark_enabled else (
+            tenant.watermark_text if (tenant is not None and tenant.watermark_enabled) else None
+        )
+        strip_tags = channel.strip_source_tags or (
+            tenant is not None and tenant.strip_source_tags and not channel.strip_source_tags
+        )
         final_text = apply_watermark(
             final_text,
-            watermark_text=channel.watermark_text if channel.watermark_enabled else None,
-            strip_source_tags=channel.strip_source_tags,
+            watermark_text=wm_text if wm_enabled else None,
+            strip_source_tags=strip_tags,
         )
 
         # Hash raw_text (not the rendered template) so that changing a template
@@ -155,7 +191,7 @@ async def normalize(ctx: dict, post_id: int) -> str:
             m["file"] for m in (post.raw_media_refs or []) if m.get("file") and not m.get("omitted")
         ]
 
-        if await _is_duplicate(session, dedupe_hash):
+        if await _is_duplicate(session, dedupe_hash, tenant):
             post.state = PostState.rejected
             session.add(
                 PostEvent(

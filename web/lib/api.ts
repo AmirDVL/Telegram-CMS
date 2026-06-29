@@ -4,6 +4,7 @@ import type {
   AITestRequest,
   AITestResponse,
   Tenant,
+  Meta,
 } from "./types";
 
 export const API_BASE =
@@ -173,19 +174,19 @@ export async function testAITransform(
   });
 }
 
+// ── Meta ────────────────────────────────────────────────────────────────────
+
+export async function fetchMeta(): Promise<Meta> {
+  return fetch(`${API_BASE}/meta`).then((r) => r.json());
+}
+
 // ── Tenants ─────────────────────────────────────────────────────────────────
 
-export async function listTenants(): Promise<Tenant[]> {
+export async function fetchTenants(): Promise<Tenant[]> {
   return apiFetch<Tenant[]>("/tenants");
 }
 
-export async function getTenant(tenantId: number): Promise<Tenant> {
-  return apiFetch<Tenant>(`/tenants/${tenantId}`);
-}
-
-export async function createTenant(
-  data: Partial<Tenant>,
-): Promise<Tenant> {
+export async function createTenant(data: Partial<Tenant>): Promise<Tenant> {
   return apiFetch<Tenant>("/tenants", {
     method: "POST",
     body: JSON.stringify(data),
@@ -193,15 +194,15 @@ export async function createTenant(
 }
 
 export async function updateTenant(
-  tenantId: number,
+  id: number,
   data: Partial<Tenant>,
 ): Promise<Tenant> {
-  return apiFetch<Tenant>(`/tenants/${tenantId}`, {
+  return apiFetch<Tenant>(`/tenants/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteTenant(tenantId: number): Promise<void> {
-  return apiFetch<void>(`/tenants/${tenantId}`, { method: "DELETE" });
+export async function disableTenant(id: number): Promise<void> {
+  return apiFetch<void>(`/tenants/${id}`, { method: "DELETE" });
 }

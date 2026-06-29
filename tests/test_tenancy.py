@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy import select
 
 from shared.models import Post
-from shared.tenant import is_multi_tenant, scope_query, stamp_tenant
+from shared.tenant import get_scoped, is_multi_tenant, scope_query, stamp_tenant
 
 # ── is_multi_tenant() ──────────────────────────────────────────────────────
 
@@ -89,3 +90,52 @@ class TestStampTenant:
             obj = _StampTarget()
             stamp_tenant(obj, tenant_id=7)
             assert obj.tenant_id == 7
+
+
+# ── get_scoped() ──────────────────────────────────────────────────────────
+
+
+class _FakePost:
+    """Minimal stand-in for a Post ORM instance (no DB needed)."""
+
+    def __init__(self, id: int, tenant_id: int | None = None) -> None:
+        self.id = id
+        self.tenant_id = tenant_id
+
+
+class TestGetScoped:
+    @pytest.mark.asyncio
+    async def test_returns_none_when_row_missing(self):
+        """session.get returns None → get_scoped returns None."""
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+        result = await get_scoped(session, Post, 999999, tenant_id=1)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_noop_when_mt_disabled(self):
+        """With MT disabled, even a tenant_id mismatch returns the object."""
+        with patch("shared.tenant.get_settings") as mock:
+            mock.return_value.multi_tenancy_enabled = False
+            fake_post = _FakePost(id=1, tenant_id=1)
+            session = AsyncMock()
+            session.get = AsyncMock(return_value=fake_post)
+            result = await get_scoped(session, Post, 1, tenant_id=999)
+            assert result is not None
+            assert result.id == 1
+
+    @pytest.mark.asyncio
+    async def test_isolates_when_mt_enabled(self):
+        """With MT enabled, a tenant_id mismatch → None; correct id → the object."""
+        with patch("shared.tenant.get_settings") as mock:
+            mock.return_value.multi_tenancy_enabled = True
+            fake_post = _FakePost(id=1, tenant_id=1)
+            session = AsyncMock()
+            session.get = AsyncMock(return_value=fake_post)
+
+            wrong = await get_scoped(session, Post, 1, tenant_id=2)
+            assert wrong is None
+
+            correct = await get_scoped(session, Post, 1, tenant_id=1)
+            assert correct is not None
+            assert correct.id == 1

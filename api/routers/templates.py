@@ -11,7 +11,7 @@ from api.schemas import TemplateCreate, TemplateOut, TemplateUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin, Template
-from shared.tenant import scope_query, stamp_tenant
+from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -48,8 +48,9 @@ async def update_template(
     payload: TemplateUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Template:
-    tpl = await session.get(Template, template_id)
+    tpl = await get_scoped(session, Template, template_id, tenant_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="template not found")
     if payload.name is not None:
@@ -66,8 +67,9 @@ async def delete_template(
     template_id: int,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
+    tenant_id: int | None = Depends(get_tenant_id),
 ) -> None:
-    tpl = await session.get(Template, template_id)
+    tpl = await get_scoped(session, Template, template_id, tenant_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="template not found")
     await session.delete(tpl)

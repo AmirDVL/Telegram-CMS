@@ -139,8 +139,18 @@ export interface Tenant {
   watermark_enabled: boolean;
   watermark_text: string | null;
   strip_source_tags: boolean;
+  ai_model: string | null;
+  ai_max_tokens: number | null;
+  ai_timeout_seconds: number | null;
+  dedupe_lookback_days: number | null;
+  publish_spacing_seconds: number | null;
+  media_max_size_bytes: number | null;
   created_at: string;
   disabled_at: string | null;
+}
+
+export interface Meta {
+  multi_tenancy_enabled: boolean;
 }
 
 export interface AITestRequest {

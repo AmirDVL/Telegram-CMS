@@ -81,6 +81,15 @@ def create_app() -> FastAPI:
     app.include_router(audit_router)
     app.include_router(tenants_router)
 
+    @app.get("/meta", tags=["meta"])
+    async def meta() -> dict:
+        """Return non-secret feature flags for the web front-end.
+
+        Notably ``multi_tenancy_enabled`` lets the web UI hide tenant management
+        when multi-tenancy is off, keeping the single-tenant UX unchanged.
+        """
+        return {"multi_tenancy_enabled": get_settings().multi_tenancy_enabled}
+
     @app.get("/healthz", response_model=HealthOut, tags=["health"])
     async def healthz() -> HealthOut:
         return HealthOut(service="api")

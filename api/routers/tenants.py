@@ -73,6 +73,13 @@ async def create_tenant(
         watermark_enabled=payload.watermark_enabled,
         watermark_text=payload.watermark_text,
         strip_source_tags=payload.strip_source_tags,
+        # Per-tenant config overrides.
+        ai_model=payload.ai_model,
+        ai_max_tokens=payload.ai_max_tokens,
+        ai_timeout_seconds=payload.ai_timeout_seconds,
+        dedupe_lookback_days=payload.dedupe_lookback_days,
+        publish_spacing_seconds=payload.publish_spacing_seconds,
+        media_max_size_bytes=payload.media_max_size_bytes,
     )
     session.add(tenant)
     try:
@@ -110,6 +117,13 @@ async def update_tenant(
         "watermark_enabled",
         "watermark_text",
         "strip_source_tags",
+        # Per-tenant config overrides.
+        "ai_model",
+        "ai_max_tokens",
+        "ai_timeout_seconds",
+        "dedupe_lookback_days",
+        "publish_spacing_seconds",
+        "media_max_size_bytes",
     ):
         if field in data:
             setattr(tenant, field, data[field])

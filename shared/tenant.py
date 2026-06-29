@@ -9,8 +9,6 @@ helpers unconditionally.
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,15 +17,13 @@ from shared.logging import get_logger
 
 log = get_logger("shared.tenant")
 
-T = TypeVar("T")
-
 
 def is_multi_tenant() -> bool:
     """Return True only when multi-tenancy is explicitly enabled."""
     return get_settings().multi_tenancy_enabled
 
 
-def scope_query(stmt: Select[T], model, tenant_id: int | None) -> Select[T]:
+def scope_query[T](stmt: Select[T], model, tenant_id: int | None) -> Select[T]:
     """Append ``WHERE model.tenant_id == tenant_id`` if multi-tenancy is on.
 
     When disabled, or when ``tenant_id`` is ``None`` (platform super-admin),

@@ -91,8 +91,14 @@ async def transform_text(
     tone_prompt: str | None = None,
     custom_system_prompt: str | None = None,
     model: str | None = None,
+    max_tokens: int | None = None,
+    timeout: int | None = None,
 ) -> TransformResult:
     """Transform text using the configured LLM (OpenAI-compatible API).
+
+    ``model``, ``max_tokens``, and ``timeout`` override the global settings when
+    provided (used for per-tenant config overrides via ``shared.tenant.effective``).
+    Pass ``None`` to fall back to the global ``Settings`` values.
 
     Raises ``AITransformError`` on any failure — the caller decides whether to
     fall back to the un-transformed text.
@@ -113,6 +119,8 @@ async def transform_text(
         custom_system_prompt=custom_system_prompt,
     )
     effective_model = model or settings.ai_model
+    effective_max_tokens = max_tokens if max_tokens is not None else settings.ai_max_tokens
+    effective_timeout = timeout if timeout is not None else settings.ai_timeout_seconds
 
     # Late import: the openai package is only required when AI is actually used.
     try:
@@ -126,7 +134,7 @@ async def transform_text(
     client = AsyncOpenAI(
         api_key=settings.ai_api_key,
         base_url=settings.ai_provider_url,
-        timeout=settings.ai_timeout_seconds,
+        timeout=effective_timeout,
     )
 
     t0 = time.monotonic()
@@ -137,7 +145,7 @@ async def transform_text(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": raw_text},
             ],
-            max_tokens=settings.ai_max_tokens,
+            max_tokens=effective_max_tokens,
             temperature=0.3,
         )
     except Exception as exc:
