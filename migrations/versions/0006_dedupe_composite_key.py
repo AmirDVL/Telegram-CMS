@@ -1,11 +1,11 @@
-"""Composite primary key for PublishedDedupe (tenant_id, dedupe_hash).
+"""Surrogate id PK for PublishedDedupe + UNIQUE NULLS NOT DISTINCT constraint.
 
-Fixes per-tenant dedupe correctness: with a single-column PK on dedupe_hash,
-tenant A publishing content X blocks tenant B from publishing identical content.
-The composite PK (tenant_id, dedupe_hash) with NULLS NOT DISTINCT ensures:
-- Multi-tenant mode: each tenant has independent dedupe scope.
-- Single-tenant mode (tenant_id=NULL): two NULLs are treated as equal, preserving
-  the original global dedupe behavior.
+Replaces the broken composite PRIMARY KEY (tenant_id, dedupe_hash) design:
+- PRIMARY KEY cannot include a nullable column (tenant_id is NULL in single-tenant
+  mode), so we use a surrogate BigInteger id as the PK instead.
+- Dedupe uniqueness is correctly enforced by a UNIQUE NULLS NOT DISTINCT constraint
+  on (tenant_id, dedupe_hash), which is valid PG15+ syntax. This treats two NULL
+  tenant_ids as equal, preserving global dedupe in single-tenant mode.
 
 Revision ID: 0006
 Revises: 0005
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0006"
@@ -24,23 +25,22 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Drop the old single-column PK and the now-redundant tenant_id index.
+    # Drop the old single-column primary key on dedupe_hash.
     op.drop_constraint("published_dedupe_pkey", "published_dedupe", type_="primary")
-    op.drop_index("ix_published_dedupe_tenant_id", "published_dedupe")
+    # Drop the standalone tenant_id index if it exists (the unique constraint below
+    # provides a tenant_id-leading index, making it redundant).
+    op.execute("DROP INDEX IF EXISTS ix_published_dedupe_tenant_id")
 
-    # Add composite PK (tenant_id, dedupe_hash) with NULLS NOT DISTINCT.
-    # SQLAlchemy/Alembic doesn't expose this option via create_primary_key(),
-    # so we use raw SQL. Postgres 15+ feature.
-    op.execute(
-        """
-        ALTER TABLE published_dedupe
-        ADD CONSTRAINT published_dedupe_pkey
-        PRIMARY KEY (tenant_id, dedupe_hash) NULLS NOT DISTINCT
-        """
+    # Surrogate primary key. A PRIMARY KEY cannot include the nullable tenant_id
+    # column, so we add an identity id. Existing rows are backfilled automatically.
+    op.add_column(
+        "published_dedupe",
+        sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
     )
+    op.create_primary_key("published_dedupe_pkey", "published_dedupe", ["id"])
 
-    # Also add a unique constraint with NULLS NOT DISTINCT for completeness
-    # (the PK already enforces uniqueness, but this makes conflict resolution clearer).
+    # Per-tenant dedupe scope. NULLS NOT DISTINCT (PG15+) makes single-tenant NULL
+    # tenant_ids dedupe globally (two NULLs treated as equal). Valid on UNIQUE.
     op.execute(
         """
         ALTER TABLE published_dedupe
@@ -53,5 +53,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("ALTER TABLE published_dedupe DROP CONSTRAINT uq_published_dedupe_tenant_hash")
     op.drop_constraint("published_dedupe_pkey", "published_dedupe", type_="primary")
-    op.execute("ALTER TABLE published_dedupe ADD CONSTRAINT published_dedupe_pkey PRIMARY KEY (dedupe_hash)")
+    op.drop_column("published_dedupe", "id")
+    op.create_primary_key("published_dedupe_pkey", "published_dedupe", ["dedupe_hash"])
     op.create_index("ix_published_dedupe_tenant_id", "published_dedupe", ["tenant_id"])

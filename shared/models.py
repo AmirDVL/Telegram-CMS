@@ -265,15 +265,23 @@ class PostEvent(Base):
 class PublishedDedupe(Base):
     __tablename__ = "published_dedupe"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "dedupe_hash", postgresql_nulls_not_distinct=True),
+        UniqueConstraint(
+            "tenant_id",
+            "dedupe_hash",
+            name="uq_published_dedupe_tenant_hash",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
-    # Composite unique constraint above acts as the logical PK. SQLAlchemy requires
-    # a mapped PK column for ORM operations, so we use tenant_id + dedupe_hash jointly.
+    # Surrogate primary key: a PRIMARY KEY cannot include the nullable tenant_id
+    # column, so dedupe uniqueness lives in the UNIQUE NULLS NOT DISTINCT constraint
+    # above (single-tenant NULL tenant_ids dedupe globally; per-tenant rows are
+    # isolated). This id exists only to satisfy SQLAlchemy's mapped-PK requirement.
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id"), nullable=True, primary_key=True
+        BigInteger, ForeignKey("tenants.id"), nullable=True
     )
-    dedupe_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dedupe_hash: Mapped[str] = mapped_column(String(64))
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
