@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0004"
 down_revision: str | None = "0003"
@@ -19,8 +20,17 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # ── New enum: ai_mode ────────────────────────────────────────────────
-    ai_mode_enum = sa.Enum("off", "translate", "summarize", "retone", "custom", name="ai_mode")
-    ai_mode_enum.create(op.get_bind(), checkfirst=True)
+    # Use raw SQL to create the type first, then reference it via
+    # postgresql.ENUM(create_type=False) in column definitions so alembic
+    # does not try to issue a second CREATE TYPE during table/column creation.
+    op.execute("CREATE TYPE ai_mode AS ENUM ('off', 'translate', 'summarize', 'retone', 'custom')")
+    # postgresql.ENUM with create_type=False is respected by op.create_table
+    # and op.add_column — it tells SQLAlchemy to assume the type already exists.
+    ai_mode_enum = postgresql.ENUM(
+        "off", "translate", "summarize", "retone", "custom",
+        name="ai_mode",
+        create_type=False,
+    )
 
     # ── Extend event_action enum with new values ─────────────────────────
     # PostgreSQL enums can be extended with ALTER TYPE ... ADD VALUE.
