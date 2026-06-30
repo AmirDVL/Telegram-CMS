@@ -68,10 +68,11 @@ COMPOSE_PROFILES=largemedia docker compose config --services
 
 ## Notes
 
-- **Migrations** run in every tier: `install.sh` uses `docker compose run --rm api
-  python -m api.cli migrate`, and naming a service on the command line activates it
-  regardless of profile. The `api` image is the same `Dockerfile.python` the core
-  `worker` already builds.
+- **Migrations** run in every tier: `install.sh` uses `docker compose run --rm
+  migrate` (a one-shot Python service on the `migrate` profile), and naming a service
+  on the command line activates it regardless of profile. Its image is the same
+  `Dockerfile.python` the core `worker` already builds. (The `api` service itself is
+  now a Go binary with no Alembic.)
 - **The fleet health gate** (`fleet/health-gate.sh`) derives its expected-service
   list from `docker compose config --services`, so it only waits on the services
   your active tier actually runs.

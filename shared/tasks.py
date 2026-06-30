@@ -13,6 +13,7 @@ it does not own, which would otherwise fail it):
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from arq import create_pool
@@ -20,6 +21,25 @@ from arq.connections import RedisSettings
 from arq.jobs import Job
 
 from shared.config import get_settings
+
+
+# ── JSON job (de)serialization ───────────────────────────────────────────────
+# ARQ defaults to pickle, which is Python-only. We use JSON instead so that
+# non-Python producers/consumers (notably the Go back-office API, which enqueues
+# `publish` jobs) can read and write the same job + result payloads. The wire
+# format is unchanged otherwise: a job is ``json({t, f, a, k, et})`` stored under
+# ``arq:job:<id>`` plus a sorted-set entry on the queue (see the Go enqueue in
+# apigo/enqueue.go). All job args/kwargs in this codebase are JSON-serializable
+# (ints, strings, None). Both the producer pool (below) AND every consuming
+# Worker (worker/main.py, bot/main.py) MUST use these so the formats agree.
+def arq_job_serializer(data: dict) -> bytes:
+    # default=str keeps result serialization from failing on odd types
+    # (e.g. datetimes); job args here are already JSON-native.
+    return json.dumps(data, default=str).encode()
+
+
+def arq_job_deserializer(data: bytes) -> dict:
+    return json.loads(data)
 
 # ── Job names (== consumer function __name__) ────────────────────────────────
 JOB_NORMALIZE = "normalize"
@@ -45,7 +65,11 @@ _pool = None
 async def _get_pool():
     global _pool
     if _pool is None:
-        _pool = await create_pool(redis_settings())
+        _pool = await create_pool(
+            redis_settings(),
+            job_serializer=arq_job_serializer,
+            job_deserializer=arq_job_deserializer,
+        )
     return _pool
 
 

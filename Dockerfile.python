@@ -26,6 +26,9 @@ COPY bot ./bot
 COPY userbot ./userbot
 COPY worker ./worker
 COPY migrations ./migrations
+# alembic.ini is required by `api.cli migrate` (Config("alembic.ini")) — without
+# it the migrate service fails with "No 'script_location' key".
+COPY alembic.ini ./
 
 # Non-root runtime.
 RUN useradd -m -u 10001 app \

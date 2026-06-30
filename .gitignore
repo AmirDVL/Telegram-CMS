@@ -1,3 +1,9 @@
+# Go (apigo back-office API) — built binaries, never commit
+apigo/api
+apigo/apigo
+apigo/*.exe
+*.test
+
 # Python
 __pycache__/
 *.py[cod]

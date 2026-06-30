@@ -13,7 +13,12 @@ from arq.cron import cron
 from shared.config import get_settings
 from shared.health import start_health_server
 from shared.logging import configure_logging, get_logger
-from shared.tasks import QUEUE_WORKER, redis_settings
+from shared.tasks import (
+    QUEUE_WORKER,
+    arq_job_deserializer,
+    arq_job_serializer,
+    redis_settings,
+)
 from worker.normalize import normalize
 from worker.reconcile import prune_dedupe, reconcile_scheduled
 
@@ -37,6 +42,9 @@ class WorkerSettings:
     functions = [normalize, prune_dedupe]
     queue_name = QUEUE_WORKER
     redis_settings: RedisSettings = redis_settings()
+    # JSON (de)serializer so the queue is language-agnostic (see shared/tasks.py).
+    job_serializer = staticmethod(arq_job_serializer)
+    job_deserializer = staticmethod(arq_job_deserializer)
     on_startup = on_startup
     on_shutdown = on_shutdown
     max_jobs = get_settings().max_concurrent_publishes + 4

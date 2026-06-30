@@ -153,8 +153,9 @@ are never touched.
 
 ### 1. DB migrations are not auto-downgraded
 
-`auto-update.sh` runs `docker compose run --rm api python -m api.cli migrate`
-(Alembic upgrade to head) after `git reset --hard $TARGET`. If the new migration
+`auto-update.sh` runs `docker compose run --rm migrate` (Alembic upgrade to head
+via the Python `migrate` service — the `api` service is Go) after
+`git reset --hard $TARGET`. If the new migration
 schema causes a health-gate failure and the updater rolls back the code to `$PREV`,
 **the migration that ran is not reversed** — Alembic downgrades are risky to
 automate and are omitted by design.
@@ -166,7 +167,7 @@ that the canary itself rolls back with a migration partially applied, a manual
 Alembic downgrade may be needed:
 
 ```bash
-docker compose run --rm api alembic downgrade -1
+docker compose run --rm migrate alembic downgrade -1
 ```
 
 ### 2. In-flight ARQ work survives container recreate
