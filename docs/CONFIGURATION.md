@@ -179,7 +179,7 @@ Comma-separated list of allowed CORS origins, or `*` for wildcard.
 - **Used by:** api
 - **Required:** no, but **must be set explicitly in production**
 
-> **Warning:** when set to `*`, FastAPI disables `allow_credentials`. This means the browser will not send the `httpOnly` refresh cookie on cross-origin requests. In production, set this to the exact origin of the web UI (e.g. `https://example.com`).
+> **Warning:** when set to `*`, the API does not send credentialed-CORS headers. This means the browser will not send the `httpOnly` refresh cookie on cross-origin requests. In production, set this to the exact origin of the web UI (e.g. `https://example.com`).
 
 ---
 

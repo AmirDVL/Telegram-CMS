@@ -1,8 +1,8 @@
 # Back-office API Reference
 
-The back-office API is a FastAPI application served at `/api` (via Caddy at
-`https://<APP_DOMAIN>/api`). An interactive OpenAPI UI is available at
-`/api/docs` (Swagger UI).
+The back-office API is a Go service (`apigo/`) served at `/api` (via Caddy at
+`https://<APP_DOMAIN>/api`). It exposes a fixed REST surface — there is no
+interactive OpenAPI/Swagger UI.
 
 ## Base URL
 

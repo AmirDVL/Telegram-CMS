@@ -4,7 +4,7 @@
 
 This is a single-tenant Telegram content management system. A long-running Telethon MTProto userbot subscribes to one or more third-party Telegram source channels, downloads and normalises incoming content, and publishes approved posts to a single destination channel through an aiogram Bot API bot.
 
-A FastAPI back-office API and a Next.js 14 web UI provide editorial control: reviewing drafts, managing tags and templates, scheduling posts, and administering users.
+A Go back-office API and a Next.js 14 web UI provide editorial control: reviewing drafts, managing tags and templates, scheduling posts, and administering users.
 
 The full stack is deployed by `install.sh` (repository root), which handles OS
 detection, Docker installation, secret generation, port conflict resolution, and

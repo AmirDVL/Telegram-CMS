@@ -121,7 +121,7 @@ curl -i -X POST https://example.com/api/auth/login \
 
 ### POST /api/auth/token
 
-OAuth2 password-flow endpoint. Identical in behaviour to `/login` but accepts a form body instead of JSON. This endpoint exists so that FastAPI's interactive docs (`/docs`) can issue tokens directly.
+OAuth2 password-flow endpoint. Identical in behaviour to `/login` but accepts a form body instead of JSON. This endpoint exists for OAuth2 password-flow clients that submit credentials as form fields.
 
 **Rate limit:** 10/min per IP
 
