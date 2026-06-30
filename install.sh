@@ -619,7 +619,9 @@ wait_for_postgres
 # tags/template (api/cli.py → _run_migrations + _seed_all). Both are idempotent,
 # so re-running the installer is safe.
 log "Running migrations + seeding (idempotent)..."
-dc run --rm api python -m api.cli migrate
+# The api service is Go (no Alembic); migrations run via the dedicated Python
+# `migrate` service (its command is `python -m api.cli migrate`).
+dc run --rm migrate
 
 log "Starting all services..."
 dc up -d

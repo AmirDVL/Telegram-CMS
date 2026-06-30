@@ -23,7 +23,12 @@ from bot.publisher import publish
 from shared.config import get_settings
 from shared.health import start_health_server
 from shared.logging import configure_logging, get_logger
-from shared.tasks import QUEUE_BOT, redis_settings
+from shared.tasks import (
+    QUEUE_BOT,
+    arq_job_deserializer,
+    arq_job_serializer,
+    redis_settings,
+)
 
 log = get_logger("bot")
 
@@ -32,6 +37,10 @@ class BotWorkerSettings:
     functions = [publish, post_draft, alert]
     queue_name = QUEUE_BOT
     redis_settings: RedisSettings = redis_settings()
+    # JSON (de)serializer so the queue is language-agnostic (see shared/tasks.py);
+    # lets the Go API enqueue `publish` jobs this worker consumes.
+    job_serializer = staticmethod(arq_job_serializer)
+    job_deserializer = staticmethod(arq_job_deserializer)
     max_jobs = get_settings().max_concurrent_publishes
     job_timeout = 900
     retry_jobs = True

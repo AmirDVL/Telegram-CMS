@@ -19,7 +19,7 @@ editorial layer.
 ## Architecture
 
 ```
-source channels ──► userbot (Telethon) ──► Postgres ◄──► api (FastAPI) ◄──► web (Next.js)
+source channels ──► userbot (Telethon) ──► Postgres ◄──► api (Go) ◄──► web (Next.js)
                           │  media dl        ▲   ▲                            │
                           ▼                   │   │  read/write draft        │
                        ARQ normalize ─► worker ┤   │                          │
@@ -42,7 +42,7 @@ Telegram publishing.
 | `userbot` | Telethon long-running process: subscribes to source channels, downloads media, inserts `posts`, enqueues `normalize`. |
 | `worker`  | ARQ worker: `normalize` + `prune_dedupe` jobs + scheduled-publish reconcile. |
 | `bot`     | aiogram 3: admin commands, draft cards with inline keyboards, `publish` worker (idempotent, spaced), delayed scheduled jobs. |
-| `api`     | FastAPI back-office: CRUD + draft-queue + audit + JWT auth. |
+| `api`     | Go back-office (`apigo/`): CRUD + draft-queue + audit + JWT auth. |
 | `web`     | Next.js back-office UI. |
 | `postgres` | Primary store. |
 | `redis`   | ARQ queue + delayed jobs + short-lived caches. |

@@ -4,7 +4,7 @@
 
 This is a single-tenant Telegram content management system. A long-running Telethon MTProto userbot subscribes to one or more third-party Telegram source channels, downloads and normalises incoming content, and publishes approved posts to a single destination channel through an aiogram Bot API bot.
 
-A FastAPI back-office API and a Next.js 14 web UI provide editorial control: reviewing drafts, managing tags and templates, scheduling posts, and administering users.
+A Go back-office API and a Next.js 14 web UI provide editorial control: reviewing drafts, managing tags and templates, scheduling posts, and administering users.
 
 The full stack is deployed by `install.sh` (repository root), which handles OS
 detection, Docker installation, secret generation, port conflict resolution, and
@@ -80,9 +80,18 @@ Consecutive publishes are spaced by `PUBLISH_SPACING_SECONDS`. `TelegramRetryAft
 
 ---
 
-### api (FastAPI)
+### api (Go)
 
-Async FastAPI application using SQLAlchemy 2.0 async + asyncpg.
+The back-office API is a single static Go binary (`apigo/`, distroless image)
+that replaced the FastAPI/uvicorn service for a much smaller footprint (~10–20 MB
+idle RSS vs ~80–150 MB). It serves the **same `/api` surface** the Next.js `web`
+consumes, reads the **same Postgres schema** (owned by Alembic — the Go service
+runs no migrations; schema management moved to the one-shot Python `migrate`
+service), and uses the **same JWT/argon2/cookie** contracts. It is produce-only
+on the queue: approving/scheduling a post enqueues the same ARQ `publish` job the
+bot consumes. Userbot (Telethon) and bot (aiogram) remain Python. The legacy
+FastAPI app is retained under `api/` as the rollback path. Behaviour below is
+unchanged from the original FastAPI implementation:
 
 - **Auth:** HS256 JWT. Access tokens expire after `ACCESS_TOKEN_TTL_MINUTES` (default 30 min). Refresh tokens are stored in an `httpOnly`, `SameSite=Lax` cookie scoped to `/api/auth` and expire after `REFRESH_TOKEN_TTL_DAYS` (default 14 days). The `/auth/login` and `/auth/token` endpoints are rate-limited to 10 requests/minute per IP via slowapi.
 - **Roles:** `editor` (read + approve/reject), `admin` (full CRUD), `super_admin` (admin management).
@@ -108,6 +117,14 @@ Primary relational store. Holds posts, tags, templates, source channels, admins,
 ### redis (Redis 7)
 
 ARQ job queue. Also used for delayed publish jobs (scheduled posts).
+
+ARQ is configured with a **JSON** job serializer/deserializer
+(`shared/tasks.py` `arq_job_serializer`/`arq_job_deserializer`) instead of the
+default pickle, so the queue is language-agnostic: the Go `api` service writes
+`publish` jobs (`SET arq:job:<id> = json({t,f,a,k,et})` + `ZADD arq:queue:bot`)
+that the Python `bot` worker consumes. All job args/kwargs in this codebase are
+JSON-native (ints, strings, None). The contract is covered by
+`tests/test_arq_json_serializer.py`.
 
 ---
 

@@ -115,11 +115,15 @@ services:
       retries: 5
       start_period: 20s
 
-  # FastAPI back-office.
+  # Back-office API — Go (apigo/). A static distroless binary replacing the
+  # FastAPI/uvicorn image for a much smaller footprint. Serves the same /api
+  # surface the Next.js web expects (Caddy strips /api before proxying).
+  # Rollback: point build at Dockerfile.python with command
+  # ["uvicorn","api.main:app","--host","0.0.0.0","--port","8000"].
   api:
     build:
-      context: .
-      dockerfile: Dockerfile.python
+      context: ./apigo
+      dockerfile: Dockerfile
     profiles: [backoffice]
     restart: unless-stopped
     env_file: .env
@@ -128,15 +132,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     expose:
       - "8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      test: ["CMD", "/api", "healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 10s
+
+  # One-shot Python image for DB migrations + seeding. The api service is now Go
+  # (no Alembic), so schema management lives here. Never started by `up` (its
+  # `migrate` profile is not in any tier); invoked via `… run --rm migrate`.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    profiles: [migrate]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "api.cli", "migrate"]
+    restart: "no"
 
   # Next.js web back-office.
   web:

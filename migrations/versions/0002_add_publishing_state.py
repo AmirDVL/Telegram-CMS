@@ -1,4 +1,4 @@
-"""Add 'publishing' to poststate enum.
+"""Add 'publishing' to post_state enum.
 
 Revision ID: 0002
 Revises: 0001
@@ -18,7 +18,7 @@ depends_on = None
 def upgrade() -> None:
     # PostgreSQL 12+ supports ADD VALUE inside a transaction.
     # IF NOT EXISTS avoids errors when re-running after a failed migration.
-    op.execute("ALTER TYPE poststate ADD VALUE IF NOT EXISTS 'publishing'")
+    op.execute("ALTER TYPE post_state ADD VALUE IF NOT EXISTS 'publishing'")
 
 
 def downgrade() -> None:

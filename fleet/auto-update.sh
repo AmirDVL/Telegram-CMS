@@ -94,7 +94,8 @@ rebuild() {
     $DC_EXEC build
 
     log "[${label}] Running migrations (idempotent)..."
-    $DC_EXEC run --rm api python -m api.cli migrate || \
+    # Migrations run via the Python `migrate` service (api is Go, no Alembic).
+    $DC_EXEC run --rm migrate || \
         warn "[${label}] Migration step exited non-zero (this may be expected on rollback)."
 
     log "[${label}] Restarting services..."

@@ -84,8 +84,9 @@ cp .env.example .env
 docker compose up -d postgres redis botapi
 
 # 2. Apply migrations + seed the super-admin
-docker compose run --rm api python -m api.cli migrate
-docker compose run --rm api python -m api.cli seed-admin
+# (the api service is Go; schema management lives in the Python `migrate` service)
+docker compose run --rm migrate
+docker compose run --rm migrate python -m api.cli seed-admin
 
 # 3. First-run userbot login (interactive TTY)
 docker compose run --rm -it userbot python -m userbot.login
@@ -293,7 +294,7 @@ Once the root cause is fixed (or the bad commit is reverted on `main`/`stable`),
 the next timer tick will re-attempt the update automatically.
 
 > **Note:** DB migrations are not auto-downgraded. If a migration ran before
-> rollback, you may need `docker compose run --rm api alembic downgrade -1`.
+> rollback, you may need `docker compose run --rm migrate alembic downgrade -1`.
 > See [`docs/FLEET_UPDATES.md`](FLEET_UPDATES.md) for details.
 
 ## 10. Monitoring (Prometheus + Grafana)
