@@ -8,7 +8,15 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
+from telethon.errors import (
+    AuthKeyError,
+    FloodWaitError,
+    PhoneNumberBannedError,
+    SessionRevokedError,
+    UserDeactivatedBanError,
+)
+
+_FATAL_ERRORS = (AuthKeyError, SessionRevokedError, UserDeactivatedBanError, PhoneNumberBannedError)
 
 from shared.config import get_settings
 from shared.db import SessionLocal
@@ -34,6 +42,10 @@ _mtproto_failure_reason: str = ""
 _WATCHDOG_INTERVAL_SECONDS: int = 30
 # A last_ok older than this threshold is considered stale (3x interval).
 _WATCHDOG_STALE_SECONDS: int = _WATCHDOG_INTERVAL_SECONDS * 3  # 90 s
+_CHANNEL_RELOAD_SECONDS: int = 300  # 5 minutes
+
+# Set by run(), used by _watchdog to trigger a clean shutdown on fatal errors.
+_stop_event: asyncio.Event | None = None
 
 
 async def load_channels() -> list[SourceChannel]:
@@ -102,17 +114,28 @@ async def _mtproto_check() -> tuple[bool, str]:
 
 
 async def _watchdog(client: TelegramClient) -> None:
-    """Periodically probe the MTProto connection and enqueue alerts on transitions."""
+    """Periodically probe the MTProto connection and enqueue alerts on transitions.
+
+    Fatal errors (session revoked, account banned) trigger a specific alert and
+    shut the process down cleanly so Docker restarts it.  Consecutive failures
+    use exponential backoff (30 s → 60 → 120 → 240 → 300 cap).
+    """
     global _mtproto_connected, _mtproto_authorized, _mtproto_last_ok
     global _mtproto_failure_count, _mtproto_failure_reason
 
-    # Import here to avoid circular issues at module-load time.
     from shared.tasks import enqueue_alert
 
     was_healthy: bool | None = None  # None = first cycle, no prior state
 
     while True:
-        await asyncio.sleep(_WATCHDOG_INTERVAL_SECONDS)
+        if _mtproto_failure_count > 0:
+            backoff = min(
+                _WATCHDOG_INTERVAL_SECONDS * (2 ** min(_mtproto_failure_count - 1, 4)),
+                300,
+            )
+            await asyncio.sleep(backoff)
+        else:
+            await asyncio.sleep(_WATCHDOG_INTERVAL_SECONDS)
 
         connected = False
         authorized = False
@@ -127,7 +150,6 @@ async def _watchdog(client: TelegramClient) -> None:
                 _mtproto_authorized = authorized
 
             if connected and authorized:
-                # Full RPC round-trip to confirm the session is genuinely alive.
                 await client.get_me()
                 _mtproto_last_ok = datetime.now(UTC)
                 _mtproto_failure_count = 0
@@ -143,6 +165,24 @@ async def _watchdog(client: TelegramClient) -> None:
                     failures=_mtproto_failure_count,
                 )
 
+        except _FATAL_ERRORS as exc:
+            reason = type(exc).__name__
+            _mtproto_failure_count += 1
+            _mtproto_failure_reason = reason
+            alert_text = (
+                f"🚨 Userbot session TERMINATED: {reason} — "
+                "manual re-login required "
+                "(docker compose run --rm -it userbot python -m userbot.login)"
+            )
+            log.error("mtproto-fatal", error=reason)
+            try:
+                await enqueue_alert(alert_text)
+            except Exception:
+                log.exception("mtproto-fatal-alert-failed")
+            if _stop_event is not None:
+                _stop_event.set()
+            return
+
         except FloodWaitError as exc:
             reason = f"floodwait:{exc.seconds}s"
             _mtproto_failure_count += 1
@@ -150,7 +190,7 @@ async def _watchdog(client: TelegramClient) -> None:
             log.warning("mtproto-watchdog-floodwait", seconds=exc.seconds, failures=_mtproto_failure_count)
 
         except asyncio.CancelledError:
-            raise  # Let cancellation propagate cleanly.
+            raise
 
         except Exception as exc:
             reason = f"{type(exc).__name__}"
@@ -167,12 +207,10 @@ async def _watchdog(client: TelegramClient) -> None:
         now_healthy, detail = _is_mtproto_healthy()
 
         if was_healthy is None:
-            # First cycle: just record state, do not alert (it was just started).
             was_healthy = now_healthy
             continue
 
         if was_healthy and not now_healthy:
-            # Healthy → unhealthy transition.
             alert_text = f"⚠️ Userbot MTProto session unhealthy: {detail}"
             log.warning("mtproto-alert-unhealthy", detail=detail)
             try:
@@ -181,7 +219,6 @@ async def _watchdog(client: TelegramClient) -> None:
                 log.exception("mtproto-alert-enqueue-failed")
 
         elif not was_healthy and now_healthy:
-            # Unhealthy → healthy transition (recovery).
             alert_text = "✅ Userbot MTProto session recovered and is healthy again."
             log.info("mtproto-alert-recovered")
             try:
@@ -192,14 +229,60 @@ async def _watchdog(client: TelegramClient) -> None:
         was_healthy = now_healthy
 
 
+async def _channel_reloader(
+    client: TelegramClient, channel_map: dict[int, SourceChannel]
+) -> None:
+    """Periodically refresh channel_map from the database so new/disabled channels
+    are picked up without a container restart."""
+    while True:
+        await asyncio.sleep(_CHANNEL_RELOAD_SECONDS)
+        try:
+            channels = await load_channels()
+            db_ids = {ch.telegram_channel_id for ch in channels}
+            current_ids = set(channel_map.keys())
+
+            for ch in channels:
+                if ch.telegram_channel_id not in current_ids:
+                    entity = await resolve_entity(client, ch)
+                    if entity is not None:
+                        channel_map[ch.telegram_channel_id] = ch
+                        log.info("channel-added", channel_id=ch.id, tg_id=ch.telegram_channel_id)
+
+            for tg_id in current_ids - db_ids:
+                removed = channel_map.pop(tg_id)
+                log.info("channel-removed", channel_id=removed.id, tg_id=tg_id)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("channel-reload-failed")
+
+
 async def run() -> None:
     configure_logging("userbot")
     settings = get_settings()
     if not settings.bot_token and not settings.telegram_api_id:
         raise RuntimeError("userbot requires TELEGRAM_API_ID/TELEGRAM_API_HASH")
 
+    global _stop_event
+    _stop_event = asyncio.Event()
+
     client = build_client()
-    await client.start(password=settings.telegram_2fa_password or None)  # type: ignore[arg-type]
+    try:
+        await client.start(password=settings.telegram_2fa_password or None)  # type: ignore[arg-type]
+    except _FATAL_ERRORS as exc:
+        log.error("userbot-start-fatal", error=type(exc).__name__)
+        from shared.tasks import enqueue_alert
+        try:
+            await enqueue_alert(
+                f"🚨 Userbot cannot start: {type(exc).__name__} — "
+                "manual re-login required "
+                "(docker compose run --rm -it userbot python -m userbot.login)"
+            )
+        except Exception:
+            pass
+        raise SystemExit(1)
+
     me = await client.get_me()
     log.info("userbot-connected", account=getattr(me, "username", None) or getattr(me, "id", None))
 
@@ -241,14 +324,18 @@ async def run() -> None:
         try:
             await ingest_message(client, event.message, channel)
         except FloodWaitError as e:
-            log.warning("floodwait-live", seconds=e.seconds)
+            log.warning("floodwait-live", seconds=e.seconds, msg_id=event.message.id)
             await asyncio.sleep(e.seconds + 1)
+            try:
+                await ingest_message(client, event.message, channel)
+            except Exception:
+                log.exception("ingest-retry-failed", msg_id=event.message.id)
         except Exception:
             log.exception("ingest-error-live", channel_id=channel.id, msg_id=event.message.id)
 
     log.info("listening", channels=len(channel_map))
 
-    stop = asyncio.Event()
+    stop = _stop_event
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -257,6 +344,9 @@ async def run() -> None:
             pass
 
     watchdog = asyncio.create_task(_watchdog(client), name="mtproto-watchdog")
+    reloader = asyncio.create_task(
+        _channel_reloader(client, channel_map), name="channel-reloader"
+    )
     task = asyncio.create_task(client.run_until_disconnected())
     _, pending = await asyncio.wait(
         {task, asyncio.create_task(stop.wait())}, return_when=asyncio.FIRST_COMPLETED
@@ -264,6 +354,7 @@ async def run() -> None:
     for t in pending:
         t.cancel()
     watchdog.cancel()
+    reloader.cancel()
     health.cancel()
     await client.disconnect()
     log.info("userbot-stopped")
