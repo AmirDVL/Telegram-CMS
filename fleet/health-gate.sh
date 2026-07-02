@@ -41,39 +41,75 @@ log "Health gate: waiting up to ${TIMEOUT}s for all services to be healthy..."
 deadline=$(( $(date +%s) + TIMEOUT ))
 
 check_all_healthy() {
-    # `docker compose ps --format json` emits one JSON object per line (jsonl).
-    # We parse Name, Status, and Health fields from each line.
+    # Try Go-template format first (Compose v2.21+), fall back to JSON parsing.
     local ps_output
+
+    # Strategy A: tab-separated Go template — no JSON parsing needed.
+    if ps_output="$($DC_EXEC ps --format '{{.Service}}\t{{.Health}}\t{{.State}}' 2>/dev/null)" \
+       && [[ -n "$ps_output" ]] && ! echo "$ps_output" | grep -q '^{'; then
+
+        local all_ok=true
+        local svc
+
+        for svc in "${EXPECTED_SERVICES[@]}"; do
+            local line
+            line="$(echo "$ps_output" | grep -E "^${svc}\b" | head -1 || true)"
+
+            if [[ -z "$line" ]]; then
+                warn "  ${svc}: not found in 'docker compose ps' output"
+                all_ok=false
+                continue
+            fi
+
+            local health state
+            health="$(echo "$line" | cut -f2)"
+            state="$(echo "$line" | cut -f3)"
+
+            if [[ -z "$health" || "$health" == "none" || "$health" == "" ]]; then
+                if [[ "$state" == "running" ]]; then
+                    log "  ${svc}: running (no healthcheck — pass)"
+                else
+                    warn "  ${svc}: state='${state}' (expected running)"
+                    all_ok=false
+                fi
+            elif [[ "$health" == "healthy" ]]; then
+                log "  ${svc}: healthy"
+            else
+                warn "  ${svc}: health='${health}' state='${state}'"
+                all_ok=false
+            fi
+        done
+
+        $all_ok
+        return
+    fi
+
+    # Strategy B: JSON output (older Compose). Parse with sed — fragile but
+    # acceptable because Docker Compose controls the output format.
     if ! ps_output="$($DC_EXEC ps --format json 2>/dev/null)"; then
-        warn "  'docker compose ps --format json' failed — retrying..."
+        warn "  'docker compose ps' failed — retrying..."
         return 1
     fi
 
-    # If output is empty (no containers up yet), not healthy.
     [[ -n "$ps_output" ]] || return 1
 
     local all_ok=true
     local svc health state
 
     for svc in "${EXPECTED_SERVICES[@]}"; do
-        # Match by the Service field (short name, e.g. "api").
-        # docker compose ps --format json outputs per-container JSON lines.
         local line
         line="$(echo "$ps_output" | grep -i "\"Service\":\"${svc}\"" 2>/dev/null || true)"
 
         if [[ -z "$line" ]]; then
-            # Container not present yet — not ready.
             warn "  ${svc}: not found in 'docker compose ps' output"
             all_ok=false
             continue
         fi
 
-        # Extract Health and State fields. Use sed for portability (no jq required).
         health="$(echo "$line" | sed -n 's/.*"Health":"\([^"]*\)".*/\1/p' || true)"
         state="$(echo  "$line" | sed -n 's/.*"State":"\([^"]*\)".*/\1/p'  || true)"
 
         if [[ -z "$health" || "$health" == "none" ]]; then
-            # No healthcheck — pass if running.
             if [[ "$state" == "running" ]]; then
                 log "  ${svc}: running (no healthcheck — pass)"
             else
