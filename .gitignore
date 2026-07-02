@@ -47,3 +47,6 @@ docker-compose.override.yml
 
 # Next.js generated env types
 web/next-env.d.ts
+
+# Next.js/TS incremental build cache
+web/tsconfig.tsbuildinfo

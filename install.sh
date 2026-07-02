@@ -276,7 +276,6 @@ get_existing() {
 if [[ "$REGENERATE_SECRETS" == true ]]; then
     JWT_SECRET=$(gen_secret)
     SEED_ADMIN_PASSWORD=$(gen_secret)
-    GRAFANA_ADMIN_PASSWORD=$(gen_secret)
     REDIS_PASSWORD=$(gen_secret)
     # Never rotate the Postgres password against an initialized volume.
     if [[ "$EXISTING_INSTALL" == true ]]; then
@@ -291,7 +290,6 @@ else
     POSTGRES_PASSWORD=$(get_existing POSTGRES_PASSWORD "$(gen_secret)")
     JWT_SECRET=$(get_existing JWT_SECRET "$(gen_secret)")
     SEED_ADMIN_PASSWORD=$(get_existing SEED_ADMIN_PASSWORD "$(gen_secret)")
-    GRAFANA_ADMIN_PASSWORD=$(get_existing GRAFANA_ADMIN_PASSWORD "$(gen_secret)")
     REDIS_PASSWORD=$(get_existing REDIS_PASSWORD "$(gen_secret)")
     log "Using secrets from existing .env."
 fi
@@ -307,7 +305,7 @@ echo -e "    ${BOLD}1) minimal${RESET}  — core only: userbot + worker + bot + 
 echo -e "                 bot-commands-only, cloud Telegram API (50 MB media cap), no web UI / TLS"
 echo -e "    ${BOLD}2) standard${RESET} — core + local Bot API server for ≤2 GB media (~2 GB)"
 echo -e "                 bot-commands-only, no web UI"
-echo -e "    ${BOLD}3) full${RESET}     — everything: web back-office + Prometheus/Grafana (~4 GB)  [default]"
+echo -e "    ${BOLD}3) full${RESET}     — core + web back-office (CRUD, queue, audit) (~3 GB)  [default]"
 echo
 
 # On a re-run, default to the tier already recorded in .env (if recognisable).
@@ -325,16 +323,16 @@ ask_optional "  Tier [1-3]" TIER_CHOICE "$TIER_DEFAULT"
 case "$TIER_CHOICE" in
     1|minimal)
         TIER_NAME="minimal"
-        BACKOFFICE_ENABLED=false; OBSERVABILITY_ENABLED=false; LARGEMEDIA_ENABLED=false
+        BACKOFFICE_ENABLED=false; LARGEMEDIA_ENABLED=false
         COMPOSE_PROFILES_VALUE="" ;;
     2|standard)
         TIER_NAME="standard"
-        BACKOFFICE_ENABLED=false; OBSERVABILITY_ENABLED=false; LARGEMEDIA_ENABLED=true
+        BACKOFFICE_ENABLED=false; LARGEMEDIA_ENABLED=true
         COMPOSE_PROFILES_VALUE="largemedia" ;;
     *)
         TIER_NAME="full"
-        BACKOFFICE_ENABLED=true; OBSERVABILITY_ENABLED=true; LARGEMEDIA_ENABLED=true
-        COMPOSE_PROFILES_VALUE="backoffice,observability,largemedia" ;;
+        BACKOFFICE_ENABLED=true; LARGEMEDIA_ENABLED=true
+        COMPOSE_PROFILES_VALUE="backoffice,largemedia" ;;
 esac
 
 # Local Bot API server (botapi) only runs in standard/full; otherwise the bot
@@ -426,7 +424,7 @@ if [[ "$REGENERATE_SECRETS" == true ]]; then
 # Pins volume/network names to tg-cms_* (read by docker compose from this file).
 COMPOSE_PROJECT_NAME=tg-cms
 # Active deployment tier. Empty = minimal (core only); largemedia = standard;
-# backoffice,observability,largemedia = full. Edit + re-run install.sh to change.
+# backoffice,largemedia = full. Edit + re-run install.sh to change.
 COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE}
 
 # ── Telegram (userbot / MTProto) ──────────────────────────────────────────────
@@ -475,12 +473,6 @@ WEB_BASE_URL=http://web:3000
 CORS_ORIGINS=https://${APP_DOMAIN}
 APP_DOMAIN=${APP_DOMAIN}
 
-# ── Observability ─────────────────────────────────────────────────────────────
-GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
-
-# ── Feature flags ─────────────────────────────────────────────────────────────
-MULTI_TENANCY_ENABLED=false
-
 # ── AI Transformation ─────────────────────────────────────────────────────────
 AI_ENABLED=${AI_ENABLED}
 AI_PROVIDER_URL=${AI_PROVIDER_URL}
@@ -502,8 +494,8 @@ else
     # Likewise pin COMPOSE_PROFILES so an upgraded install keeps running the full
     # stack (preserves pre-profiles behaviour) until the operator opts down.
     if ! grep -q '^COMPOSE_PROFILES=' "$ENV_FILE"; then
-        printf '\n# Added by install.sh — deployment tier (full preserves prior behaviour)\nCOMPOSE_PROFILES=backoffice,observability,largemedia\n' >> "$ENV_FILE"
-        log "Added COMPOSE_PROFILES=backoffice,observability,largemedia to existing .env."
+        printf '\n# Added by install.sh — deployment tier (full preserves prior behaviour)\nCOMPOSE_PROFILES=backoffice,largemedia\n' >> "$ENV_FILE"
+        log "Added COMPOSE_PROFILES=backoffice,largemedia to existing .env."
     fi
 fi
 
@@ -533,25 +525,19 @@ extract_host_port() {
 
 if [[ -f "$OVERRIDE_FILE" ]]; then
     # Re-run: reuse the existing mapping. Re-detecting here would flag our OWN
-    # running Caddy/Grafana as conflicts and prompt to remap on every run.
+    # running Caddy as a conflict and prompt to remap on every run.
     HOST_HTTP_PORT=$(extract_host_port "$OVERRIDE_FILE" 80);   HOST_HTTP_PORT=${HOST_HTTP_PORT:-80}
     HOST_HTTPS_PORT=$(extract_host_port "$OVERRIDE_FILE" 443); HOST_HTTPS_PORT=${HOST_HTTPS_PORT:-443}
-    HOST_GRAFANA_PORT=$(extract_host_port "$OVERRIDE_FILE" 3000); HOST_GRAFANA_PORT=${HOST_GRAFANA_PORT:-3001}
-    log "Reusing existing port mapping (HTTP=${HOST_HTTP_PORT}, HTTPS=${HOST_HTTPS_PORT}, Grafana=${HOST_GRAFANA_PORT})."
+    log "Reusing existing port mapping (HTTP=${HOST_HTTP_PORT}, HTTPS=${HOST_HTTPS_PORT})."
 else
     # Only the profiles that actually publish host ports are checked. Inactive
     # ones get their defaults so later references stay valid under `set -u`.
-    HOST_HTTP_PORT=80; HOST_HTTPS_PORT=443; HOST_GRAFANA_PORT=3001
+    HOST_HTTP_PORT=80; HOST_HTTPS_PORT=443
     if [[ "$BACKOFFICE_ENABLED" == true ]]; then
         resolve_port "HTTP (Caddy)"    80   HOST_HTTP_PORT
         resolve_port "HTTPS (Caddy)"   443  HOST_HTTPS_PORT
     else
         log "Back-office profile off — skipping Caddy port check (no public HTTP/TLS)."
-    fi
-    if [[ "$OBSERVABILITY_ENABLED" == true ]]; then
-        resolve_port "Grafana"         3001 HOST_GRAFANA_PORT
-    else
-        log "Observability profile off — skipping Grafana port check."
     fi
 fi
 
@@ -566,12 +552,6 @@ if [[ "$BACKOFFICE_ENABLED" == true && ( "$HOST_HTTP_PORT" != "80" || "$HOST_HTT
       - \"${HOST_HTTPS_PORT}:443\""
 fi
 
-GRAFANA_PORTS_BLOCK=""
-if [[ "$OBSERVABILITY_ENABLED" == true && "$HOST_GRAFANA_PORT" != "3001" ]]; then
-    GRAFANA_PORTS_BLOCK="    ports:
-      - \"${HOST_GRAFANA_PORT}:3000\""
-fi
-
 # Write the override — Redis requirepass is always included
 {
     echo "# Generated by install.sh"
@@ -581,10 +561,6 @@ fi
     if [[ -n "$CADDY_PORTS_BLOCK" ]]; then
         echo "  caddy:"
         echo "$CADDY_PORTS_BLOCK"
-    fi
-    if [[ -n "$GRAFANA_PORTS_BLOCK" ]]; then
-        echo "  grafana:"
-        echo "$GRAFANA_PORTS_BLOCK"
     fi
 } > "$OVERRIDE_FILE"
 
@@ -823,9 +799,6 @@ if [[ "$BACKOFFICE_ENABLED" == true ]]; then
     echo -e "  Admin login     : ${BOLD}admin${RESET} / ${BOLD}${SEED_ADMIN_PASSWORD}${RESET}"
 else
     echo -e "  Management      : ${BOLD}bot commands only${RESET} (no web back-office in this tier)"
-fi
-if [[ "$OBSERVABILITY_ENABLED" == true ]]; then
-    echo -e "  Grafana         : ${CYAN}http://${HOST_IP}:${HOST_GRAFANA_PORT}${RESET}"
 fi
 if [[ "$LARGEMEDIA_ENABLED" != true ]]; then
     echo -e "  Media           : cloud Telegram API, ${BOLD}50 MB${RESET} upload cap (no local Bot API)"
