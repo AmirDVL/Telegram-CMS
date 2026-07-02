@@ -348,6 +348,31 @@ fi
 
 log "Selected tier: ${TIER_NAME} (COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE:-<none>})"
 
+# ── 6.6 Container images: pull from GHCR, or build on this host ────────────────
+echo
+box "━━━ Container images ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  App images (api, web, and the Python worker/bot/userbot) are built in CI"
+echo "  and published to GHCR, tagged by commit. Provide a read-only GHCR token to"
+echo "  pull them; leave it blank to build the images on this host instead."
+echo
+# Reuse creds from a prior install (fleet.conf) on a re-run.
+EXISTING_GHCR_USER=""; EXISTING_GHCR_TOKEN=""
+if [[ -f /etc/tg-cms/fleet.conf ]]; then
+    EXISTING_GHCR_USER="$(sed -n 's/^GHCR_USER=//p' /etc/tg-cms/fleet.conf 2>/dev/null | head -1)"
+    EXISTING_GHCR_TOKEN="$(sed -n 's/^GHCR_PULL_TOKEN=//p' /etc/tg-cms/fleet.conf 2>/dev/null | head -1)"
+fi
+ask_optional "  GHCR username (your GitHub username)" GHCR_USER "$EXISTING_GHCR_USER"
+ask_optional_secret "  GHCR read token (read:packages PAT, blank = keep/none)" GHCR_PULL_TOKEN
+[[ -z "$GHCR_PULL_TOKEN" ]] && GHCR_PULL_TOKEN="$EXISTING_GHCR_TOKEN"
+# The git commit is the image version; CI publishes ghcr.io/amirdvl/telegram-cms-*:<sha>.
+IMAGE_TAG="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || echo local)"
+if [[ -z "$GHCR_PULL_TOKEN" ]]; then
+    log "No GHCR token — images will be built on this host. (Fleet auto-updates, if"
+    log "enabled, then pull anonymously and require the GHCR packages to be public.)"
+else
+    log "Image tag: ${IMAGE_TAG:0:12} (will pull from ghcr.io)."
+fi
+
 # ── 7. Interactive prompts for required user-supplied values ──────────────────
 echo
 box "━━━ Telegram configuration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -426,6 +451,8 @@ COMPOSE_PROJECT_NAME=tg-cms
 # Active deployment tier. Empty = minimal (core only); largemedia = standard;
 # backoffice,largemedia = full. Edit + re-run install.sh to change.
 COMPOSE_PROFILES=${COMPOSE_PROFILES_VALUE}
+# Image version to run: a git SHA pulls CI-built images; "local" = built on host.
+IMAGE_TAG=${IMAGE_TAG}
 
 # ── Telegram (userbot / MTProto) ──────────────────────────────────────────────
 TELEGRAM_API_ID=${TG_API_ID}
@@ -591,6 +618,26 @@ wait_for_postgres() {
 }
 wait_for_postgres
 
+# ── Acquire images: pull from GHCR if a token was given, else build on-host ────
+IMAGES_READY=false
+if [[ -n "$GHCR_PULL_TOKEN" ]]; then
+    log "Logging in to ghcr.io as ${GHCR_USER:-$USER}..."
+    if echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-$USER}" --password-stdin &>/dev/null; then
+        log "Pulling images (IMAGE_TAG=${IMAGE_TAG:0:12})..."
+        if dc pull; then
+            IMAGES_READY=true
+        else
+            warn "Image pull failed (CI may not have published ${IMAGE_TAG:0:12} yet). Building on this host instead."
+        fi
+    else
+        warn "ghcr.io login failed. Building images on this host instead."
+    fi
+fi
+if [[ "$IMAGES_READY" != true ]]; then
+    log "Building images on this host..."
+    dc build
+fi
+
 # `migrate` applies Alembic migrations to head AND seeds the super-admin + default
 # tags/template (api/cli.py → _run_migrations + _seed_all). Both are idempotent,
 # so re-running the installer is safe.
@@ -711,6 +758,15 @@ FLEET_PROMOTE_TOKEN=${FLEET_PROMOTE_TOKEN}"
         FLEET_CONF_CONTENT+="
 FLEET_ALERT_CHAT_ID=${FLEET_ALERT_CHAT_ID}
 BOT_TOKEN=${BOT_TOKEN}"
+
+    # GHCR pull creds so the updater can pull private images (read-only token).
+    [[ -n "${GHCR_USER:-}" ]] && \
+        FLEET_CONF_CONTENT+="
+GHCR_USER=${GHCR_USER}"
+
+    [[ -n "${GHCR_PULL_TOKEN:-}" ]] && \
+        FLEET_CONF_CONTENT+="
+GHCR_PULL_TOKEN=${GHCR_PULL_TOKEN}"
 
     if [[ -f "$FLEET_CONF_FILE" ]] && [[ "$(cat "$FLEET_CONF_FILE")" == "$FLEET_CONF_CONTENT" ]]; then
         log "Fleet config unchanged — skipping."

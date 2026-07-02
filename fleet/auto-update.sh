@@ -2,8 +2,9 @@
 # fleet/auto-update.sh — zero-touch per-host updater for tg-cms
 #
 # Triggered by tg-cms-update.timer (every ~5 min). Fetches the tracked git ref,
-# rebuilds and re-deploys if the ref advanced, health-gates the result, and
-# auto-rolls-back the code on failure. Writes structured status for journald.
+# pulls the CI-built images for that commit and re-deploys if the ref advanced,
+# health-gates the result, and auto-rolls-back on failure. Writes structured
+# status for journald.
 #
 # Config sourced from /etc/tg-cms/fleet.conf (written by install.sh, mode 600).
 #
@@ -53,6 +54,8 @@ FLEET_PROMOTE_REMOTE="${FLEET_PROMOTE_REMOTE:-}"
 FLEET_PROMOTE_TOKEN="${FLEET_PROMOTE_TOKEN:-}"
 FLEET_ALERT_CHAT_ID="${FLEET_ALERT_CHAT_ID:-}"
 BOT_TOKEN="${BOT_TOKEN:-}"
+GHCR_USER="${GHCR_USER:-}"
+GHCR_PULL_TOKEN="${GHCR_PULL_TOKEN:-}"
 
 # Path to this fleet directory (sibling scripts live here)
 FLEET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +64,17 @@ FLEET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$INSTALL_DIR"
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
     die "INSTALL_DIR '${INSTALL_DIR}' is not inside a git work tree."
+fi
+
+# ── Registry auth (private GHCR pulls) ────────────────────────────────────────
+# Optional: only needed when the GHCR packages are private. Token lives in
+# fleet.conf (mode 600) and is piped to docker login — never written elsewhere.
+if [[ -n "$GHCR_USER" && -n "$GHCR_PULL_TOKEN" ]]; then
+    if echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin &>/dev/null; then
+        log "Logged in to ghcr.io as ${GHCR_USER}."
+    else
+        warn "ghcr.io login failed — private image pulls may fail."
+    fi
 fi
 
 # ── Non-interactive fetch (fail cleanly rather than hanging for a prompt) ─────
@@ -85,14 +99,34 @@ fi
 log "Update detected: ${CURRENT:0:12} → ${TARGET:0:12}"
 PREV="$CURRENT"
 
-# ── Helper: run a single rebuild step, tolerating migrate failures ─────────────
-# migrate is idempotent but may legitimately output errors on rollback; we still
-# want the `up -d` to proceed so the stack is brought back up.
-rebuild() {
-    local label="$1"
-    log "[${label}] Building images..."
-    $DC_EXEC build
+# ── Helper: persist the image tag for this commit ─────────────────────────────
+# Persist IMAGE_TAG into .env so compose pulls/runs the image built for this exact
+# commit — and so the boot-time tg-cms.service `up -d` uses the same tag. The git
+# SHA is the fleet's version; CI publishes ghcr.io/amirdvl/telegram-cms-*:<sha>.
+write_image_tag() {
+    local sha="$1"
+    IMAGE_TAG="$sha"
+    export IMAGE_TAG
+    local env_file="${INSTALL_DIR}/.env"
+    if grep -q '^IMAGE_TAG=' "$env_file" 2>/dev/null; then
+        sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${sha}|" "$env_file"
+    else
+        printf '\nIMAGE_TAG=%s\n' "$sha" >> "$env_file"
+    fi
+}
 
+# Pull the CI-built images for the current IMAGE_TAG. Returns non-zero if the
+# registry doesn't have them yet (CI still building) or is unreachable — callers
+# decide whether to retry (forward) or fall back to cached images (rollback).
+pull_images() {
+    local label="$1"
+    log "[${label}] Pulling images (IMAGE_TAG=${IMAGE_TAG:0:12})..."
+    $DC_EXEC pull
+}
+
+# Run migrations (idempotent) + (re)start services from whatever images are local.
+deploy() {
+    local label="$1"
     log "[${label}] Running migrations (idempotent)..."
     # Migrations run via the Python `migrate` service (api is Go, no Alembic).
     $DC_EXEC run --rm migrate || \
@@ -137,9 +171,20 @@ promote_stable() {
 # ── Forward update ────────────────────────────────────────────────────────────
 log "Applying update: resetting to ${TARGET:0:12}..."
 git reset --hard "$TARGET"
+write_image_tag "$TARGET"
 
-if ! rebuild "update"; then
-    warn "Rebuild step encountered errors."
+# Pull the images CI built for this SHA. If they aren't published yet (CI still
+# running) or the registry is unreachable, leave the running stack untouched and
+# retry on the next timer tick — never rebuild on the host.
+if ! pull_images "update"; then
+    warn "Images for ${TARGET:0:12} not available yet (CI may still be building). Reverting tree; will retry next tick."
+    git reset --hard "$PREV"
+    write_image_tag "$PREV"
+    exit 0
+fi
+
+if ! deploy "update"; then
+    warn "Deploy step encountered errors."
 fi
 
 # ── Health gate ───────────────────────────────────────────────────────────────
@@ -164,7 +209,9 @@ fi
 warn "Health gate FAILED after ${HEALTH_TIMEOUT}s. Rolling back to ${PREV:0:12}..."
 
 git reset --hard "$PREV"
-rebuild "rollback" || true
+write_image_tag "$PREV"
+pull_images "rollback" || warn "Pull failed on rollback — using locally cached images."
+deploy "rollback" || true
 
 log "Re-running health gate on rolled-back code..."
 if "${FLEET_DIR}/health-gate.sh" "$HEALTH_TIMEOUT"; then
