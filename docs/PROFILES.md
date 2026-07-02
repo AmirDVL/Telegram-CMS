@@ -12,6 +12,10 @@ Because every `docker compose` command (and the fleet auto-updater) reads `.env`
 automatically, the selection applies to `build`, `up`, `ps`, `config`, and the
 health gate with no extra flags.
 
+> **Images:** app images (api, web, python) are built in CI and pulled from GHCR
+> by SHA (`IMAGE_TAG` in `.env`); on-host `docker compose build` remains a
+> fallback. See [`docs/FLEET_UPDATES.md`](FLEET_UPDATES.md#container-images-ghcr).
+
 ## Profiles
 
 | Service | Profile | Purpose |

@@ -113,10 +113,16 @@ running in every tier.
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `ruff` (lint) and `pytest` on
-every push and pull request. Tests mock the Telegram-publishing boundary (ARQ
-enqueue) and cover the deduplication logic (`shared/dedupe.py`), normalize
-routing (`worker/normalize.py`), and a `/metrics` endpoint smoke test — no
-Postgres/Redis required.
+every push and pull request, plus `go vet`/`build`/`test` for the Go API. Tests
+mock the Telegram-publishing boundary (ARQ enqueue) and cover the deduplication
+logic (`shared/dedupe.py`), normalize routing (`worker/normalize.py`), and a
+`/metrics` endpoint smoke test — no Postgres/Redis required.
+
+On green pushes to `main`, CI also builds the three app images (api, web, python)
+and pushes them to GHCR tagged by commit SHA. Hosts **pull** these
+(`ghcr.io/amirdvl/telegram-cms-*:<sha>`) rather than building on-box; on-host
+`docker compose build` stays as a fallback. See
+[`docs/FLEET_UPDATES.md`](docs/FLEET_UPDATES.md#container-images-ghcr).
 
 ## Linking Telegram accounts for bot inline buttons
 

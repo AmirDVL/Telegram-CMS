@@ -1,8 +1,28 @@
 # Fleet Updates — Zero-Touch Automatic Updates
 
 tg-cms ships a **zero-touch update** system that lets every deployed host detect
-a new release, rebuild its local images, health-gate the result, and auto-roll
-back the code if the new build is broken — all without operator action.
+a new release, pull the CI-built images for that commit, health-gate the result,
+and auto-roll back if the new release is broken — all without operator action.
+
+## Container images (GHCR)
+
+Hosts do **not** build images. On every push to `main`, CI (`.github/workflows/ci.yml`)
+builds the three app images and pushes them to GHCR tagged by the commit SHA:
+
+- `ghcr.io/amirdvl/telegram-cms-python` — worker / userbot / bot / migrate
+- `ghcr.io/amirdvl/telegram-cms-api` — the Go back-office API
+- `ghcr.io/amirdvl/telegram-cms-web` — the Next.js UI
+
+The git commit SHA **is** the image version: `.env`'s `IMAGE_TAG` is set to the
+tracked commit and `docker compose pull` fetches `…:<sha>`. Because `stable` only
+ever points at a SHA that was already on `main`, its images always exist.
+
+**One-time GHCR setup** (owner, after the first `main` build publishes the packages):
+if you keep the packages **private**, create a read-only PAT (scope `read:packages`)
+and set `GHCR_USER` / `GHCR_PULL_TOKEN` in each host's `/etc/tg-cms/fleet.conf`
+(and at install time). If you make the packages **public**, no host credentials are
+needed. On-host build remains available as a fallback (`docker compose build`) for
+local dev, air-gapped installs, or a registry outage.
 
 ## Topology
 
@@ -138,16 +158,22 @@ sudo cat /etc/tg-cms/fleet.conf
 If the health gate does not pass within `HEALTH_TIMEOUT` seconds (default 180):
 
 1. `git reset --hard $PREV` (reverts to the last known-good git ref).
-2. `docker compose build && docker compose up -d --remove-orphans` (rebuilds the
-   old code).
+2. `docker compose pull && docker compose up -d --remove-orphans` (re-deploys the
+   old images — still present in GHCR and usually cached locally).
 3. Health gate is re-run on the rolled-back stack.
 4. A Telegram alert is sent (if `FLEET_ALERT_CHAT_ID` and `BOT_TOKEN` are set).
 5. The updater exits non-zero — visible in `systemctl status tg-cms-update` and
    `journalctl -u tg-cms-update`.
 
-The rollback is **code-only**: git ref + container images are reverted. The
+The rollback is **code + image only**: git ref and `IMAGE_TAG` are reverted. The
 Postgres data volume and `.env`/`docker-compose.override.yml` (both gitignored)
 are never touched.
+
+> **Image not published yet?** If a host advances to a SHA whose images CI hasn't
+> finished building (or the registry is unreachable), the forward `docker compose pull`
+> fails, the updater reverts the tree to `$PREV` **without touching the running
+> stack**, and retries on the next ~5-minute tick. The stack keeps serving the old
+> release until the images are available.
 
 ## Caveats
 
@@ -155,7 +181,7 @@ are never touched.
 
 `auto-update.sh` runs `docker compose run --rm migrate` (Alembic upgrade to head
 via the Python `migrate` service — the `api` service is Go) after
-`git reset --hard $TARGET`. If the new migration
+`git reset --hard $TARGET` and the image pull. If the new migration
 schema causes a health-gate failure and the updater rolls back the code to `$PREV`,
 **the migration that ran is not reversed** — Alembic downgrades are risky to
 automate and are omitted by design.
