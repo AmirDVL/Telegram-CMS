@@ -18,7 +18,6 @@ type Config struct {
 	RefreshTTLDays   int
 	CORSOrigins      string
 	AppDomain        string
-	MultiTenancy     bool
 
 	AIEnabled        bool
 	AIProviderURL    string
@@ -81,7 +80,6 @@ func LoadConfig() *Config {
 		RefreshTTLDays:   getenvInt("REFRESH_TOKEN_TTL_DAYS", 14),
 		CORSOrigins:      getenv("CORS_ORIGINS", "*"),
 		AppDomain:        getenv("APP_DOMAIN", "localhost"),
-		MultiTenancy:     getenvBool("MULTI_TENANCY_ENABLED", false),
 		AIEnabled:        getenvBool("AI_ENABLED", false),
 		AIProviderURL:    getenv("AI_PROVIDER_URL", "https://api.openai.com/v1"),
 		AIAPIKey:         getenv("AI_API_KEY", ""),

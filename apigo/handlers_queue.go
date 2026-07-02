@@ -36,7 +36,6 @@ func (a *App) loadPost(ctx context.Context, id int64) (*postRow, error) {
 }
 
 func (a *App) handleListQueue(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
 	q := r.URL.Query()
 	states := q["state"]
 	for _, s := range states {
@@ -66,10 +65,6 @@ func (a *App) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	if len(states) > 0 {
 		wargs = append(wargs, states)
 		where = append(where, fmt.Sprintf("state::text = ANY($%d)", len(wargs)))
-	}
-	if a.scoped(tid) {
-		wargs = append(wargs, *tid)
-		where = append(where, fmt.Sprintf("tenant_id=$%d", len(wargs)))
 	}
 	clause := ""
 	if len(where) > 0 {
@@ -110,13 +105,12 @@ func (a *App) handleGetPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	tid := tenantID(r)
 	p, err := a.loadPost(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if p == nil || !a.tenantOwned(tid, p.TenantID) {
+	if p == nil {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
@@ -129,14 +123,13 @@ func (a *App) handleEditTags(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	tid := tenantID(r)
 	actor := adminFromCtx(r)
 	p, err := a.loadPost(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if p == nil || !a.tenantOwned(tid, p.TenantID) {
+	if p == nil {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
@@ -189,14 +182,13 @@ func (a *App) decide(w http.ResponseWriter, r *http.Request, action string, tagI
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	tid := tenantID(r)
 	actor := adminFromCtx(r)
 	p, err := a.loadPost(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if p == nil || !a.tenantOwned(tid, p.TenantID) {
+	if p == nil {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}

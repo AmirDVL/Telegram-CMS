@@ -9,13 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_tenant_id, require_role
+from api.deps import require_role
 from api.schemas import AdminCreate, AdminOut, AdminUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin
 from shared.security import hash_password
-from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 router = APIRouter(prefix="/admins", tags=["admins"])
 
@@ -24,9 +23,8 @@ router = APIRouter(prefix="/admins", tags=["admins"])
 async def list_admins(
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> list[Admin]:
-    stmt = scope_query(select(Admin).order_by(Admin.username), Admin, tenant_id)
+    stmt = select(Admin).order_by(Admin.username)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -36,7 +34,6 @@ async def create_admin(
     payload: AdminCreate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.super_admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Admin:
     admin = Admin(
         username=payload.username,
@@ -44,11 +41,6 @@ async def create_admin(
         role=payload.role,
         tg_user_id=payload.tg_user_id,
     )
-    # Use explicit payload tenant_id if provided, otherwise stamp from JWT.
-    if payload.tenant_id is not None:
-        admin.tenant_id = payload.tenant_id
-    else:
-        stamp_tenant(admin, tenant_id)
     session.add(admin)
     try:
         await session.commit()
@@ -65,9 +57,8 @@ async def update_admin(
     payload: AdminUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.super_admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Admin:
-    admin = await get_scoped(session, Admin, admin_id, tenant_id)
+    admin = await session.get(Admin, admin_id)
     if admin is None:
         raise HTTPException(status_code=404, detail="admin not found")
     if payload.password is not None:

@@ -28,24 +28,6 @@ DEFAULT_TAGS = [
 ]
 
 
-async def _ensure_default_tenant(session) -> int | None:
-    """Create the default tenant if multi-tenancy is on. Return its id (or None)."""
-    from shared.models import Tenant
-
-    settings = get_settings()
-    if not settings.multi_tenancy_enabled:
-        return None
-    existing = await session.scalar(
-        select(Tenant).where(Tenant.slug == "default")
-    )
-    if existing is not None:
-        return existing.id
-    tenant = Tenant(slug="default", name="Default Tenant")
-    session.add(tenant)
-    await session.flush()
-    return tenant.id
-
-
 async def _seed_admin() -> None:
     settings = get_settings()
     if not settings.seed_admin_username or not settings.seed_admin_password:
@@ -56,13 +38,11 @@ async def _seed_admin() -> None:
         )
         if existing is not None:
             return
-        tenant_id = await _ensure_default_tenant(session)
         session.add(
             Admin(
                 username=settings.seed_admin_username,
                 password_hash=hash_password(settings.seed_admin_password),
                 role=Role.super_admin,
-                tenant_id=tenant_id,
             )
         )
         await session.commit()
@@ -70,12 +50,9 @@ async def _seed_admin() -> None:
 
 async def _seed_defaults() -> None:
     async with SessionLocal() as session:
-        tenant_id = await _ensure_default_tenant(session)
         # Default template
         if (await session.scalar(select(Template).where(Template.name == "Default"))) is None:
             tpl = Template(name="Default", body=DEFAULT_TEMPLATE)
-            if tenant_id is not None:
-                tpl.tenant_id = tenant_id
             session.add(tpl)
         # Default tag vocabulary
         existing_slugs = {
@@ -84,8 +61,6 @@ async def _seed_defaults() -> None:
         for slug, label, color in DEFAULT_TAGS:
             if slug not in existing_slugs:
                 tag = Tag(slug=slug, label=label, color=color)
-                if tenant_id is not None:
-                    tag.tenant_id = tenant_id
                 session.add(tag)
         await session.commit()
 

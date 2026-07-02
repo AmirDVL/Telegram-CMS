@@ -40,7 +40,6 @@ class TokenClaims:
     role: Role
     token_type: str  # "access" | "refresh"
     exp: datetime
-    tenant_id: int | None = None  # Multi-tenancy: tenant scope (None = platform-level)
 
 
 def _encode(payload: dict) -> str:
@@ -53,9 +52,7 @@ def _decode(token: str) -> dict:
     return jwt.decode(token, s.jwt_secret, algorithms=[s.jwt_algo])
 
 
-def create_access_token(
-    admin_id: int, username: str, role: Role, *, tenant_id: int | None = None
-) -> str:
+def create_access_token(admin_id: int, username: str, role: Role) -> str:
     s = get_settings()
     now = datetime.now(UTC)
     exp = now + timedelta(minutes=s.access_token_ttl_minutes)
@@ -67,14 +64,10 @@ def create_access_token(
         "iat": now,
         "exp": exp,
     }
-    if tenant_id is not None:
-        payload["tenant_id"] = tenant_id
     return _encode(payload)
 
 
-def create_refresh_token(
-    admin_id: int, username: str, role: Role, *, tenant_id: int | None = None
-) -> str:
+def create_refresh_token(admin_id: int, username: str, role: Role) -> str:
     s = get_settings()
     now = datetime.now(UTC)
     exp = now + timedelta(days=s.refresh_token_ttl_days)
@@ -86,8 +79,6 @@ def create_refresh_token(
         "iat": now,
         "exp": exp,
     }
-    if tenant_id is not None:
-        payload["tenant_id"] = tenant_id
     return _encode(payload)
 
 
@@ -102,5 +93,4 @@ def decode_token(token: str) -> TokenClaims | None:
         role=Role(data["role"]),
         token_type=data["token_type"],
         exp=datetime.fromtimestamp(data["exp"], tz=UTC),
-        tenant_id=int(data["tenant_id"]) if data.get("tenant_id") is not None else None,
     )

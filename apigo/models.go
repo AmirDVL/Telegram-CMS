@@ -58,7 +58,7 @@ func int64Slice(s []int64) []int64 {
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 
-const adminCols = `id, username, password_hash, role, tg_user_id, tenant_id, created_at, disabled_at`
+const adminCols = `id, username, password_hash, role, tg_user_id, created_at, disabled_at`
 
 type adminRow struct {
 	ID           int64
@@ -66,14 +66,13 @@ type adminRow struct {
 	PasswordHash string
 	Role         string
 	TgUserID     *int64
-	TenantID     *int64
 	CreatedAt    time.Time
 	DisabledAt   *time.Time
 }
 
 func scanAdmin(r scannable) (*adminRow, error) {
 	a := &adminRow{}
-	err := r.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.Role, &a.TgUserID, &a.TenantID, &a.CreatedAt, &a.DisabledAt)
+	err := r.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.Role, &a.TgUserID, &a.CreatedAt, &a.DisabledAt)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +84,6 @@ type AdminOut struct {
 	Username   string     `json:"username"`
 	Role       string     `json:"role"`
 	TgUserID   *int64     `json:"tg_user_id"`
-	TenantID   *int64     `json:"tenant_id"`
 	CreatedAt  time.Time  `json:"created_at"`
 	DisabledAt *time.Time `json:"disabled_at"`
 }
@@ -93,27 +91,26 @@ type AdminOut struct {
 func (a *adminRow) DTO() AdminOut {
 	return AdminOut{
 		ID: a.ID, Username: a.Username, Role: a.Role,
-		TgUserID: a.TgUserID, TenantID: a.TenantID,
+		TgUserID: a.TgUserID,
 		CreatedAt: a.CreatedAt, DisabledAt: a.DisabledAt,
 	}
 }
 
 // ── Tag ──────────────────────────────────────────────────────────────────────
 
-const tagCols = `id, slug, label, color, tenant_id, created_at`
+const tagCols = `id, slug, label, color, created_at`
 
 type tagRow struct {
 	ID        int64
 	Slug      string
 	Label     string
 	Color     *string
-	TenantID  *int64
 	CreatedAt time.Time
 }
 
 func scanTag(r scannable) (*tagRow, error) {
 	t := &tagRow{}
-	err := r.Scan(&t.ID, &t.Slug, &t.Label, &t.Color, &t.TenantID, &t.CreatedAt)
+	err := r.Scan(&t.ID, &t.Slug, &t.Label, &t.Color, &t.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -134,19 +131,18 @@ func (t *tagRow) DTO() TagOut {
 
 // ── Template ─────────────────────────────────────────────────────────────────
 
-const templateCols = `id, name, body, tenant_id, created_at`
+const templateCols = `id, name, body, created_at`
 
 type templateRow struct {
 	ID        int64
 	Name      string
 	Body      string
-	TenantID  *int64
 	CreatedAt time.Time
 }
 
 func scanTemplate(r scannable) (*templateRow, error) {
 	t := &templateRow{}
-	err := r.Scan(&t.ID, &t.Name, &t.Body, &t.TenantID, &t.CreatedAt)
+	err := r.Scan(&t.ID, &t.Name, &t.Body, &t.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +165,7 @@ func (t *templateRow) DTO() TemplateOut {
 const channelCols = `id, telegram_channel_id, title, username, ingestion_enabled, policy, ` +
 	`default_tag_ids, normalization_template_id, max_media_size_bytes, source_label, ` +
 	`ai_enabled, ai_mode, ai_target_language, ai_tone_prompt, ai_custom_system_prompt, ` +
-	`watermark_enabled, watermark_text, strip_source_tags, created_at, tenant_id`
+	`watermark_enabled, watermark_text, strip_source_tags, created_at`
 
 type channelRow struct {
 	ID                      int64
@@ -191,7 +187,6 @@ type channelRow struct {
 	WatermarkText           *string
 	StripSourceTags         bool
 	CreatedAt               time.Time
-	TenantID                *int64
 }
 
 func scanChannel(r scannable) (*channelRow, error) {
@@ -200,7 +195,7 @@ func scanChannel(r scannable) (*channelRow, error) {
 		&c.ID, &c.TelegramChannelID, &c.Title, &c.Username, &c.IngestionEnabled, &c.Policy,
 		&c.DefaultTagIDs, &c.NormalizationTemplateID, &c.MaxMediaSizeBytes, &c.SourceLabel,
 		&c.AIEnabled, &c.AIMode, &c.AITargetLanguage, &c.AITonePrompt, &c.AICustomSystemPrompt,
-		&c.WatermarkEnabled, &c.WatermarkText, &c.StripSourceTags, &c.CreatedAt, &c.TenantID,
+		&c.WatermarkEnabled, &c.WatermarkText, &c.StripSourceTags, &c.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -267,7 +262,7 @@ func (c *channelRow) AISettings() AISettingsOut {
 
 const postCols = `id, source_channel_id, source_message_id, raw_text, raw_media_refs, received_at, ` +
 	`state, normalized_text, ai_transformed_text, media_paths, tag_ids, scheduled_for, ` +
-	`published_message_id, published_at, dedupe_hash, created_at, updated_at, tenant_id`
+	`published_message_id, published_at, dedupe_hash, created_at, updated_at`
 
 type postRow struct {
 	ID                 int64
@@ -287,7 +282,6 @@ type postRow struct {
 	DedupeHash         *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	TenantID           *int64
 }
 
 func scanPost(r scannable) (*postRow, error) {
@@ -295,7 +289,7 @@ func scanPost(r scannable) (*postRow, error) {
 	err := r.Scan(
 		&p.ID, &p.SourceChannelID, &p.SourceMessageID, &p.RawText, &p.RawMediaRefs, &p.ReceivedAt,
 		&p.State, &p.NormalizedText, &p.AITransformedText, &p.MediaPaths, &p.TagIDs, &p.ScheduledFor,
-		&p.PublishedMessageID, &p.PublishedAt, &p.DedupeHash, &p.CreatedAt, &p.UpdatedAt, &p.TenantID,
+		&p.PublishedMessageID, &p.PublishedAt, &p.DedupeHash, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -337,7 +331,7 @@ func (p *postRow) DTO() PostOut {
 
 // ── PostEvent ────────────────────────────────────────────────────────────────
 
-const postEventCols = `id, post_id, actor_admin_id, action, payload, created_at, tenant_id`
+const postEventCols = `id, post_id, actor_admin_id, action, payload, created_at`
 
 type postEventRow struct {
 	ID           int64
@@ -346,12 +340,11 @@ type postEventRow struct {
 	Action       string
 	Payload      json.RawMessage
 	CreatedAt    time.Time
-	TenantID     *int64
 }
 
 func scanPostEvent(r scannable) (*postEventRow, error) {
 	e := &postEventRow{}
-	err := r.Scan(&e.ID, &e.PostID, &e.ActorAdminID, &e.Action, &e.Payload, &e.CreatedAt, &e.TenantID)
+	err := r.Scan(&e.ID, &e.PostID, &e.ActorAdminID, &e.Action, &e.Payload, &e.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -371,93 +364,6 @@ func (e *postEventRow) DTO() PostEventOut {
 	return PostEventOut{
 		ID: e.ID, PostID: e.PostID, ActorAdminID: e.ActorAdminID, Action: e.Action,
 		Payload: jsonOrEmpty(e.Payload, "{}"), CreatedAt: e.CreatedAt,
-	}
-}
-
-// ── Tenant ───────────────────────────────────────────────────────────────────
-
-const tenantCols = `id, slug, name, bot_token, destination_channel_id, editor_group_id, ` +
-	`ai_enabled, ai_mode, ai_target_language, ai_tone_prompt, ai_custom_system_prompt, ` +
-	`watermark_enabled, watermark_text, strip_source_tags, ai_model, ai_max_tokens, ` +
-	`ai_timeout_seconds, dedupe_lookback_days, publish_spacing_seconds, media_max_size_bytes, ` +
-	`created_at, disabled_at`
-
-type tenantRow struct {
-	ID                    int64
-	Slug                  string
-	Name                  string
-	BotToken              *string
-	DestinationChannelID  *int64
-	EditorGroupID         *int64
-	AIEnabled             bool
-	AIMode                string
-	AITargetLanguage      *string
-	AITonePrompt          *string
-	AICustomSystemPrompt  *string
-	WatermarkEnabled      bool
-	WatermarkText         *string
-	StripSourceTags       bool
-	AIModel               *string
-	AIMaxTokens           *int64
-	AITimeoutSeconds      *int64
-	DedupeLookbackDays    *int64
-	PublishSpacingSeconds *float64
-	MediaMaxSizeBytes     *int64
-	CreatedAt             time.Time
-	DisabledAt            *time.Time
-}
-
-func scanTenant(r scannable) (*tenantRow, error) {
-	t := &tenantRow{}
-	err := r.Scan(
-		&t.ID, &t.Slug, &t.Name, &t.BotToken, &t.DestinationChannelID, &t.EditorGroupID,
-		&t.AIEnabled, &t.AIMode, &t.AITargetLanguage, &t.AITonePrompt, &t.AICustomSystemPrompt,
-		&t.WatermarkEnabled, &t.WatermarkText, &t.StripSourceTags, &t.AIModel, &t.AIMaxTokens,
-		&t.AITimeoutSeconds, &t.DedupeLookbackDays, &t.PublishSpacingSeconds, &t.MediaMaxSizeBytes,
-		&t.CreatedAt, &t.DisabledAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return t, nil
-}
-
-type TenantOut struct {
-	ID                    int64      `json:"id"`
-	Slug                  string     `json:"slug"`
-	Name                  string     `json:"name"`
-	BotToken              *string    `json:"bot_token"`
-	DestinationChannelID  *int64     `json:"destination_channel_id"`
-	EditorGroupID         *int64     `json:"editor_group_id"`
-	AIEnabled             bool       `json:"ai_enabled"`
-	AIMode                string     `json:"ai_mode"`
-	AITargetLanguage      *string    `json:"ai_target_language"`
-	AITonePrompt          *string    `json:"ai_tone_prompt"`
-	AICustomSystemPrompt  *string    `json:"ai_custom_system_prompt"`
-	WatermarkEnabled      bool       `json:"watermark_enabled"`
-	WatermarkText         *string    `json:"watermark_text"`
-	StripSourceTags       bool       `json:"strip_source_tags"`
-	AIModel               *string    `json:"ai_model"`
-	AIMaxTokens           *int64     `json:"ai_max_tokens"`
-	AITimeoutSeconds      *int64     `json:"ai_timeout_seconds"`
-	DedupeLookbackDays    *int64     `json:"dedupe_lookback_days"`
-	PublishSpacingSeconds *float64   `json:"publish_spacing_seconds"`
-	MediaMaxSizeBytes     *int64     `json:"media_max_size_bytes"`
-	CreatedAt             time.Time  `json:"created_at"`
-	DisabledAt            *time.Time `json:"disabled_at"`
-}
-
-func (t *tenantRow) DTO() TenantOut {
-	return TenantOut{
-		ID: t.ID, Slug: t.Slug, Name: t.Name, BotToken: t.BotToken,
-		DestinationChannelID: t.DestinationChannelID, EditorGroupID: t.EditorGroupID,
-		AIEnabled: t.AIEnabled, AIMode: t.AIMode, AITargetLanguage: t.AITargetLanguage,
-		AITonePrompt: t.AITonePrompt, AICustomSystemPrompt: t.AICustomSystemPrompt,
-		WatermarkEnabled: t.WatermarkEnabled, WatermarkText: t.WatermarkText,
-		StripSourceTags: t.StripSourceTags, AIModel: t.AIModel, AIMaxTokens: t.AIMaxTokens,
-		AITimeoutSeconds: t.AITimeoutSeconds, DedupeLookbackDays: t.DedupeLookbackDays,
-		PublishSpacingSeconds: t.PublishSpacingSeconds, MediaMaxSizeBytes: t.MediaMaxSizeBytes,
-		CreatedAt: t.CreatedAt, DisabledAt: t.DisabledAt,
 	}
 }
 

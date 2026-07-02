@@ -5,7 +5,6 @@ from api.routers.queue import router as queue_router
 from api.routers.source_channels import router as source_channels_router
 from api.routers.tags import router as tags_router
 from api.routers.templates import router as templates_router
-from api.routers.tenants import router as tenants_router
 
 __all__ = [
     "admins_router",
@@ -15,5 +14,4 @@ __all__ = [
     "source_channels_router",
     "tags_router",
     "templates_router",
-    "tenants_router",
 ]

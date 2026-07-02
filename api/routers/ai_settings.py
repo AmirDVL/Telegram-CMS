@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_tenant_id, require_role
+from api.deps import require_role
 from api.schemas import AISettingsOut, AISettingsUpdate, AITestRequest, AITestResponse
 from shared.config import get_settings
 from shared.db import get_session
@@ -21,12 +21,9 @@ async def get_ai_settings(
     channel_id: int,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> AISettingsOut:
     channel = await session.get(SourceChannel, channel_id)
     if channel is None:
-        raise HTTPException(status_code=404, detail="source channel not found")
-    if tenant_id is not None and channel.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="source channel not found")
     return AISettingsOut.model_validate(channel)
 
@@ -37,12 +34,9 @@ async def update_ai_settings(
     payload: AISettingsUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> AISettingsOut:
     channel = await session.get(SourceChannel, channel_id)
     if channel is None:
-        raise HTTPException(status_code=404, detail="source channel not found")
-    if tenant_id is not None and channel.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="source channel not found")
 
     data = payload.model_dump(exclude_unset=True)
@@ -70,7 +64,6 @@ async def test_ai_transform(
     payload: AITestRequest,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> AITestResponse:
     """Dry-run: send sample text through the LLM and return the result.
 
@@ -84,8 +77,6 @@ async def test_ai_transform(
 
     channel = await session.get(SourceChannel, channel_id)
     if channel is None:
-        raise HTTPException(status_code=404, detail="source channel not found")
-    if tenant_id is not None and channel.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="source channel not found")
 
     # Use request payload overrides, fall back to channel settings.

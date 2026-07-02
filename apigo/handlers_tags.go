@@ -10,16 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// stampTenant mirrors shared.tenant.stamp_tenant: returns the tenant to assign on
-// insert (nil unless multi-tenancy is on and a tenant scope is set).
-func (a *App) stampTenant(r *http.Request) *int64 {
-	tid := tenantID(r)
-	if a.cfg.MultiTenancy && tid != nil {
-		return tid
-	}
-	return nil
-}
-
 func slugify(value string) (string, bool) {
 	var b strings.Builder
 	prevDash := false
@@ -55,15 +45,8 @@ func (a *App) loadTag(ctx context.Context, id int64) (*tagRow, error) {
 }
 
 func (a *App) handleListTags(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
-	q := `SELECT ` + tagCols + ` FROM tags`
-	var args []any
-	if a.scoped(tid) {
-		q += ` WHERE tenant_id=$1`
-		args = append(args, *tid)
-	}
-	q += ` ORDER BY label`
-	rows, err := a.db.Query(r.Context(), q, args...)
+	q := `SELECT ` + tagCols + ` FROM tags ORDER BY label`
+	rows, err := a.db.Query(r.Context(), q)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
@@ -82,15 +65,8 @@ func (a *App) handleListTags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleCountTags(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
-	q := `SELECT count(id) FROM tags`
-	var args []any
-	if a.scoped(tid) {
-		q += ` WHERE tenant_id=$1`
-		args = append(args, *tid)
-	}
 	var n int64
-	if err := a.db.QueryRow(r.Context(), q, args...).Scan(&n); err != nil {
+	if err := a.db.QueryRow(r.Context(), `SELECT count(id) FROM tags`).Scan(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
@@ -113,8 +89,8 @@ func (a *App) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := a.db.QueryRow(r.Context(),
-		`INSERT INTO tags(slug,label,color,tenant_id) VALUES($1,$2,$3,$4) RETURNING `+tagCols,
-		slug, in.Label, in.Color, a.stampTenant(r))
+		`INSERT INTO tags(slug,label,color) VALUES($1,$2,$3) RETURNING `+tagCols,
+		slug, in.Label, in.Color)
 	t, err := scanTag(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -133,13 +109,12 @@ func (a *App) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "tag not found")
 		return
 	}
-	tid := tenantID(r)
 	t, err := a.loadTag(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if t == nil || !a.tenantOwned(tid, t.TenantID) {
+	if t == nil {
 		writeError(w, http.StatusNotFound, "tag not found")
 		return
 	}
@@ -164,10 +139,6 @@ func (a *App) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 	}
 	q := `UPDATE tags SET ` + b.clause() + fmt.Sprintf(" WHERE id=$%d", len(b.args)+1)
 	b.args = append(b.args, id)
-	if a.scoped(tid) {
-		q += fmt.Sprintf(" AND tenant_id=$%d", len(b.args)+1)
-		b.args = append(b.args, *tid)
-	}
 	q += ` RETURNING ` + tagCols
 	updated, err := scanTag(a.db.QueryRow(r.Context(), q, b.args...))
 	if err != nil {
@@ -183,13 +154,12 @@ func (a *App) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "tag not found")
 		return
 	}
-	tid := tenantID(r)
 	t, err := a.loadTag(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if t == nil || !a.tenantOwned(tid, t.TenantID) {
+	if t == nil {
 		writeError(w, http.StatusNotFound, "tag not found")
 		return
 	}
@@ -201,12 +171,7 @@ func (a *App) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	uq := `UPDATE posts SET tag_ids = array_remove(tag_ids, $1) WHERE array_position(tag_ids,$1) IS NOT NULL`
-	uargs := []any{id}
-	if a.scoped(tid) {
-		uq += ` AND tenant_id=$2`
-		uargs = append(uargs, *tid)
-	}
-	if _, err := tx.Exec(r.Context(), uq, uargs...); err != nil {
+	if _, err := tx.Exec(r.Context(), uq, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}

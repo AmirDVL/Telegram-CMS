@@ -21,7 +21,7 @@ The Python API stack (uvicorn + FastAPI + SQLAlchemy + asyncpg + pydantic on
 | `main.go`, `server.go` | wiring, router, graceful shutdown, container healthcheck |
 | `config.go` | env config (mirrors `shared/config.py`) |
 | `models.go` | DB row structs + response DTOs (mirror `api/schemas.py`) + enums |
-| `auth_jwt.go`, `auth_argon2.go`, `auth_mw.go` | HS256 JWT, argon2id verify/hash, role/tenant middleware |
+| `auth_jwt.go`, `auth_argon2.go`, `auth_mw.go` | HS256 JWT, argon2id verify/hash, role middleware |
 | `cors.go`, `metrics.go`, `ratelimit.go` | middleware (CORS, Prometheus, Redis rate limit) |
 | `enqueue.go` | produce-only ARQ `publish` jobs (JSON serializer) |
 | `aiclient.go` | OpenAI-compatible call for `/source-channels/{id}/ai/test` |
@@ -31,7 +31,7 @@ The Python API stack (uvicorn + FastAPI + SQLAlchemy + asyncpg + pydantic on
 ## Compatibility contracts (must stay in lockstep with the Python services)
 
 - **JWT** — HS256 with `JWT_SECRET`; claims `{sub, admin_id, role, token_type, iat,
-  exp, tenant_id?}` identical to `shared/security.py`.
+  exp}` identical to `shared/security.py`.
 - **Passwords** — argon2id PHC strings compatible with argon2-cffi (verify existing
   hashes; new hashes verify under Python too).
 - **ARQ** — `enqueue.go` writes `SET arq:job:<uuid> = json({t,f,a,k,et})` + `ZADD

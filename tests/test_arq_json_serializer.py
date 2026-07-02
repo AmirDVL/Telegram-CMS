@@ -37,7 +37,8 @@ def test_go_style_job_body_is_consumable():
 
 
 def test_alert_kwargs_roundtrip():
-    """The bot's `alert` job carries a tenant_id kwarg; JSON must preserve it."""
+    """A legacy in-flight `alert` job may carry a tenant_id kwarg (now ignored by
+    the consumer); the JSON serializer must still preserve arbitrary kwargs."""
     blob = serialize_job(
         "alert", ("hello",), {"tenant_id": 5}, None, 1_751_299_200_000,
         serializer=arq_job_serializer,
