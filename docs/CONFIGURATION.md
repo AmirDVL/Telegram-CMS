@@ -70,6 +70,29 @@ always run. To change tier on a live host, edit this line and run
 - **Used by:** docker compose (all services)
 - **Required:** no (empty = minimal tier)
 
+### `IMAGE_TAG`
+
+Which image version compose runs. A **git commit SHA** pulls the CI-built images
+from GHCR (`ghcr.io/amirdvl/telegram-cms-*:<sha>`); `local` uses images built on
+this host (`docker compose build`). `install.sh` and `fleet/auto-update.sh` set
+this automatically to the deployed commit — you rarely edit it by hand.
+
+- **Default:** `local` (in `.env.example`); a git SHA on a managed host
+- **Used by:** docker compose (api, web, worker, userbot, bot, migrate)
+- **Required:** no
+
+### `GHCR_USER` / `GHCR_PULL_TOKEN`
+
+Credentials to pull **private** GHCR images. `GHCR_USER` is a GitHub username and
+`GHCR_PULL_TOKEN` a read-only PAT (scope `read:packages`). Used by `install.sh`
+and `fleet/auto-update.sh` to `docker login ghcr.io` before pulling. Leave blank
+if the packages are public. **Live only in `/etc/tg-cms/fleet.conf` (mode 600)**,
+never in `.env` or git.
+
+- **Default:** unset (blank = build on host / anonymous pull)
+- **Used by:** install.sh, fleet/auto-update.sh
+- **Required:** only when the GHCR packages are private
+
 ---
 
 ## Database

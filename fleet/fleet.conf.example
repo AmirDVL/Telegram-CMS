@@ -42,6 +42,15 @@ HEALTH_TIMEOUT=180
 # Stored in this file at mode 600 — never committed to git.
 #FLEET_PROMOTE_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxx
 
+# ── Optional: private GHCR image pull (read-only) ─────────────────────────────
+
+# The updater pulls CI-built images from GHCR instead of building on the host.
+# For PRIVATE packages, set a GitHub username + a read-only Personal Access Token
+# (scope: read:packages) so it can `docker login ghcr.io`. Leave both blank if
+# the packages are public (no auth needed). Stored here at mode 600.
+#GHCR_USER=your-github-username
+#GHCR_PULL_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxx
+
 # ── Optional: Telegram alerts ─────────────────────────────────────────────────
 
 # Telegram chat ID to send update/rollback alerts to.

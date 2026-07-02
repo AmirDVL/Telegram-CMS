@@ -49,6 +49,7 @@ services:
 
   # ARQ worker: normalization + dedupe pruning + publish reconcile.
   worker:
+    image: ghcr.io/amirdvl/telegram-cms-python:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile.python
@@ -72,6 +73,7 @@ services:
 
   # Userbot (Telethon MTProto): reads third-party source channels + downloads media.
   userbot:
+    image: ghcr.io/amirdvl/telegram-cms-python:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile.python
@@ -95,6 +97,7 @@ services:
 
   # Bot API bot (aiogram 3): admin surface + publish worker + delayed scheduled jobs.
   bot:
+    image: ghcr.io/amirdvl/telegram-cms-python:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile.python
@@ -121,6 +124,7 @@ services:
   # Rollback: point build at Dockerfile.python with command
   # ["uvicorn","api.main:app","--host","0.0.0.0","--port","8000"].
   api:
+    image: ghcr.io/amirdvl/telegram-cms-api:${IMAGE_TAG:-local}
     build:
       context: ./apigo
       dockerfile: Dockerfile
@@ -145,6 +149,7 @@ services:
   # (no Alembic), so schema management lives here. Never started by `up` (its
   # `migrate` profile is not in any tier); invoked via `… run --rm migrate`.
   migrate:
+    image: ghcr.io/amirdvl/telegram-cms-python:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile.python
@@ -158,6 +163,7 @@ services:
 
   # Next.js web back-office.
   web:
+    image: ghcr.io/amirdvl/telegram-cms-web:${IMAGE_TAG:-local}
     build:
       context: ./web
       dockerfile: Dockerfile
