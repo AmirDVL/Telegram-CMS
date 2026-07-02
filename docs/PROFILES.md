@@ -2,8 +2,8 @@
 
 The stack ships as a single `docker-compose.yml`, but not every host needs every
 service. A 1 GB VPS can run the ingest→publish pipeline fine, but the Next.js web
-back-office (200–400 MB) and the Prometheus + Grafana pair (~400–600 MB) can OOM
-it. To fit small hosts, services are grouped into [Docker Compose
+back-office (200–400 MB) can OOM it. To fit small hosts, services are grouped
+into [Docker Compose
 profiles](https://docs.docker.com/compose/profiles/) selected by the
 `COMPOSE_PROFILES` line in `.env`.
 
@@ -19,7 +19,6 @@ health gate with no extra flags.
 | `postgres`, `redis`, `userbot`, `worker`, `bot` | _(none — core)_ | Always run. The ingest → normalize → publish pipeline + bot admin commands. |
 | `api`, `web`, `caddy` | `backoffice` | REST API, Next.js back-office UI, and the TLS reverse proxy in front of them. |
 | `botapi` | `largemedia` | Local telegram-bot-api server for uploads up to 2 GB. |
-| `prometheus`, `grafana` | `observability` | Metrics scraping + dashboards. |
 
 Core services have no `profiles:` key, so they always start. The web/api/caddy
 trio is coupled into one `backoffice` profile because the REST API's only in-stack
@@ -31,7 +30,7 @@ consumer is the web UI, and Caddy needs both upstreams present.
 |------|--------------------|-----------|--------------|
 | **minimal** | _(empty)_ | ~1 GB | Core only. Management is **bot commands only**. Uses the **cloud** Telegram API with a **50 MB** media cap. No web UI, no TLS, no domain needed. |
 | **standard** | `largemedia` | ~2 GB | Core + local Bot API server (media up to 2 GB). Still bot-commands-only management. |
-| **full** | `backoffice,observability,largemedia` | ~4 GB | Everything: web back-office, REST API, TLS, Prometheus + Grafana. **Default.** |
+| **full** | `backoffice,largemedia` | ~3 GB | Core + web back-office, REST API, TLS. **Default.** |
 
 ## Cloud vs local Bot API
 
@@ -51,7 +50,7 @@ Edit `COMPOSE_PROFILES` in `.env` and recreate the stack; `--remove-orphans`
 stops services that are no longer in an active profile:
 
 ```bash
-# full → standard (drop web UI + metrics)
+# full → standard (drop web UI)
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=largemedia/' .env
 docker compose up -d --remove-orphans
 ```
@@ -76,5 +75,5 @@ COMPOSE_PROFILES=largemedia docker compose config --services
 - **The fleet health gate** (`fleet/health-gate.sh`) derives its expected-service
   list from `docker compose config --services`, so it only waits on the services
   your active tier actually runs.
-- **Observability without back-office** is allowed but not useful — Prometheus has
-  nothing to scrape if `api` is off. The `full` tier always includes both.
+- **Metrics** — the Go `api` still exposes a Prometheus-format `/metrics` endpoint
+  for optional external scraping; no in-stack Prometheus/Grafana is bundled.

@@ -143,7 +143,7 @@ If the health gate does not pass within `HEALTH_TIMEOUT` seconds (default 180):
 3. Health gate is re-run on the rolled-back stack.
 4. A Telegram alert is sent (if `FLEET_ALERT_CHAT_ID` and `BOT_TOKEN` are set).
 5. The updater exits non-zero — visible in `systemctl status tg-cms-update` and
-   surfaced to Grafana via journal scraping.
+   `journalctl -u tg-cms-update`.
 
 The rollback is **code-only**: git ref + container images are reverted. The
 Postgres data volume and `.env`/`docker-compose.override.yml` (both gitignored)

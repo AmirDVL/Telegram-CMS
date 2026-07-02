@@ -74,7 +74,7 @@ prompt before touching existing secrets.
 
 **Deployment tiers:** the installer asks which tier to run — `minimal` (core only,
 ~1 GB, bot-commands-only via the cloud Telegram API), `standard` (+ local Bot API
-for ≤2 GB media, ~2 GB), or `full` (+ web back-office and Prometheus/Grafana, ~4 GB;
+for ≤2 GB media, ~2 GB), or `full` (+ web back-office, ~3 GB;
 the default). Tiers are Docker Compose profiles, so you can change one later by
 editing `COMPOSE_PROFILES` in `.env`. See [`docs/PROFILES.md`](docs/PROFILES.md).
 
@@ -102,18 +102,13 @@ backup/restore.
 
 ## Observability
 
-The API exposes a **Prometheus `/metrics`** endpoint (scraped at `api:8000/metrics`)
+The API exposes a **Prometheus `/metrics`** endpoint (at `api:8000/metrics`)
 covering HTTP request latency/count and **ARQ queue depth** for both the `worker`
-and `bot` queues. A ready-to-run stack ships in `docker-compose.yml`:
-
-- **prometheus** — scrapes the API every 15s (config in `observability/prometheus.yml`).
-- **grafana** — exposed on host port `3001` with a provisioned Prometheus
-  datasource and an overview dashboard (`observability/grafana/dashboards/`).
-  Log in with `admin` / `GRAFANA_ADMIN_PASSWORD` (default `admin`).
-
-> Cross-process coordination is already **Postgres + ARQ-on-Redis** (a dedicated
-> broker + task-queue framework); the queue-depth metric makes that brokering
-> observable rather than adding a second, competing queue system.
+and `bot` queues. No Prometheus/Grafana containers are bundled — point an external
+scraper at the endpoint if you want dashboards. Separately, the userbot's MTProto
+liveness is surfaced via `/healthz` and an **editor-group alert** (`bot/alerts.py`)
+that fires on healthy↔unhealthy transitions, independent of any metrics stack and
+running in every tier.
 
 ## CI
 
@@ -150,7 +145,6 @@ the defaults shown here; edit `.env` afterwards to override any of them.
 | Redis password | auto-generated | `REDIS_PASSWORD` |
 | JWT secret | auto-generated | `JWT_SECRET` |
 | Seed admin password | auto-generated | `SEED_ADMIN_PASSWORD` |
-| Grafana admin password | auto-generated | `GRAFANA_ADMIN_PASSWORD` |
 | Dedupe lookback window | 7 days | `DEDUPE_LOOKBACK_DAYS` |
 | Audit-log retention | 90 days | `AUDIT_RETENTION_DAYS` |
 | Media retention on volume | 30 days post-publish | `MEDIA_RETENTION_DAYS` |

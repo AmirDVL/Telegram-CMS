@@ -95,7 +95,8 @@ GET /api/metrics
 Prometheus exposition format (not in the OpenAPI schema). No authentication
 required. Returns the `api_http_requests_total`,
 `api_http_request_duration_seconds`, and `arq_queue_depth` metric families.
-Scraped internally by the `prometheus` service every 15s — see
+No Prometheus/Grafana containers are bundled — point an external scraper at this
+endpoint if you want dashboards. See
 [ARCHITECTURE.md → Observability](../ARCHITECTURE.md#observability) for the full
-metric reference. The scrape is best-effort: an unreachable Redis yields a queue
+metric reference. The endpoint is best-effort: an unreachable Redis yields a queue
 depth of `0` rather than an error.
