@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
 FROM node:20-alpine AS deps
+# (build context is web/; image published as ghcr.io/amirdvl/telegram-cms-web)
 WORKDIR /app
 COPY package.json ./
 RUN npm install --no-audit --no-fund
