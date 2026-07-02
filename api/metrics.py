@@ -1,7 +1,7 @@
 """Prometheus metrics for the FastAPI back-office.
 
-Exposes three families at ``/metrics`` (scraped by Prometheus; see
-``observability/prometheus.yml``):
+Exposes three families at ``/metrics`` (Prometheus exposition format for
+optional external scraping):
 
 - ``api_http_requests_total``            — request counter (method, route, status)
 - ``api_http_request_duration_seconds``  — latency histogram (method, route)

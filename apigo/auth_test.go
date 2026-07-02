@@ -13,8 +13,7 @@ func testApp() *App {
 
 func TestJWTAccessRoundTrip(t *testing.T) {
 	a := testApp()
-	tid := int64(7)
-	tok, err := a.createAccessToken(42, "alice", RoleAdmin, &tid)
+	tok, err := a.createAccessToken(42, "alice", RoleAdmin)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -34,14 +33,11 @@ func TestJWTAccessRoundTrip(t *testing.T) {
 	if claims.TokenType != "access" {
 		t.Errorf("token_type = %q, want access", claims.TokenType)
 	}
-	if claims.TenantID == nil || *claims.TenantID != 7 {
-		t.Errorf("tenant_id = %v, want 7", claims.TenantID)
-	}
 }
 
-func TestJWTRefreshTypeAndNoTenant(t *testing.T) {
+func TestJWTRefreshType(t *testing.T) {
 	a := testApp()
-	tok, err := a.createRefreshToken(1, "bob", RoleEditor, nil)
+	tok, err := a.createRefreshToken(1, "bob", RoleEditor)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -52,14 +48,11 @@ func TestJWTRefreshTypeAndNoTenant(t *testing.T) {
 	if claims.TokenType != "refresh" {
 		t.Errorf("token_type = %q, want refresh", claims.TokenType)
 	}
-	if claims.TenantID != nil {
-		t.Errorf("tenant_id = %v, want nil", claims.TenantID)
-	}
 }
 
 func TestJWTRejectsWrongSecret(t *testing.T) {
 	a := testApp()
-	tok, _ := a.createAccessToken(1, "x", RoleEditor, nil)
+	tok, _ := a.createAccessToken(1, "x", RoleEditor)
 	other := &App{cfg: &Config{JWTSecret: "a-totally-different-secret-value", JWTAlgo: "HS256"}}
 	if _, err := other.decodeToken(tok); err == nil {
 		t.Error("expected decode to fail with a different secret")

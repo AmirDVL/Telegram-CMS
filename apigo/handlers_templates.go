@@ -22,15 +22,8 @@ func (a *App) loadTemplate(ctx context.Context, id int64) (*templateRow, error) 
 }
 
 func (a *App) handleListTemplates(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
-	q := `SELECT ` + templateCols + ` FROM templates`
-	var args []any
-	if a.scoped(tid) {
-		q += ` WHERE tenant_id=$1`
-		args = append(args, *tid)
-	}
-	q += ` ORDER BY name`
-	rows, err := a.db.Query(r.Context(), q, args...)
+	q := `SELECT ` + templateCols + ` FROM templates ORDER BY name`
+	rows, err := a.db.Query(r.Context(), q)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
@@ -58,8 +51,8 @@ func (a *App) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := a.db.QueryRow(r.Context(),
-		`INSERT INTO templates(name,body,tenant_id) VALUES($1,$2,$3) RETURNING `+templateCols,
-		in.Name, in.Body, a.stampTenant(r))
+		`INSERT INTO templates(name,body) VALUES($1,$2) RETURNING `+templateCols,
+		in.Name, in.Body)
 	t, err := scanTemplate(row)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
@@ -74,13 +67,12 @@ func (a *App) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}
-	tid := tenantID(r)
 	t, err := a.loadTemplate(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if t == nil || !a.tenantOwned(tid, t.TenantID) {
+	if t == nil {
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}
@@ -105,10 +97,6 @@ func (a *App) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	q := `UPDATE templates SET ` + b.clause() + fmt.Sprintf(" WHERE id=$%d", len(b.args)+1)
 	b.args = append(b.args, id)
-	if a.scoped(tid) {
-		q += fmt.Sprintf(" AND tenant_id=$%d", len(b.args)+1)
-		b.args = append(b.args, *tid)
-	}
 	q += ` RETURNING ` + templateCols
 	updated, err := scanTemplate(a.db.QueryRow(r.Context(), q, b.args...))
 	if err != nil {
@@ -124,13 +112,12 @@ func (a *App) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}
-	tid := tenantID(r)
 	t, err := a.loadTemplate(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if t == nil || !a.tenantOwned(tid, t.TenantID) {
+	if t == nil {
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}

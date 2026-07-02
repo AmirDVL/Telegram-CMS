@@ -12,13 +12,12 @@ from __future__ import annotations
 from aiogram.exceptions import TelegramAPIError
 
 from bot.cards import build_draft_payload
-from bot.client import get_bot, get_bot_for_tenant
+from bot.client import get_bot
 from shared.config import get_settings
 from shared.db import SessionLocal
 from shared.enums import EventAction
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, SourceChannel
-from shared.tenant import get_tenant_for_channel
 
 log = get_logger("bot.draft")
 
@@ -36,15 +35,6 @@ async def post_draft(ctx: dict, post_id: int) -> str:
     settings = get_settings()
     editor_group_id = settings.editor_group_id
     bot = get_bot()
-
-    # Resolve tenant-specific editor group and bot.
-    if post.tenant_id:
-        async with SessionLocal() as session:
-            tenant = await get_tenant_for_channel(session, post.source_channel_id)
-        if tenant is not None:
-            if tenant.editor_group_id:
-                editor_group_id = tenant.editor_group_id
-            bot = get_bot_for_tenant(tenant.id, tenant.bot_token)
 
     if not editor_group_id:
         log.error("editor-group-not-configured")

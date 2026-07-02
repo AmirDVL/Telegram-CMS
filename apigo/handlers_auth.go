@@ -8,11 +8,11 @@ import (
 const refreshCookieName = "refresh_token"
 
 func (a *App) tokensFor(admin *adminRow) (TokenOut, error) {
-	at, err := a.createAccessToken(admin.ID, admin.Username, Role(admin.Role), admin.TenantID)
+	at, err := a.createAccessToken(admin.ID, admin.Username, Role(admin.Role))
 	if err != nil {
 		return TokenOut{}, err
 	}
-	rt, err := a.createRefreshToken(admin.ID, admin.Username, Role(admin.Role), admin.TenantID)
+	rt, err := a.createRefreshToken(admin.ID, admin.Username, Role(admin.Role))
 	if err != nil {
 		return TokenOut{}, err
 	}

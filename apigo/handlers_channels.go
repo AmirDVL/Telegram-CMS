@@ -13,15 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ownedByClaim mirrors the inline ownership check in api/routers (channels, AI):
-// `if tenant_id is not None and row.tenant_id != tenant_id: 404`.
-func ownedByClaim(tid *int64, owner *int64) bool {
-	if tid == nil {
-		return true
-	}
-	return owner != nil && *owner == *tid
-}
-
 func formatInt64List(xs []int64) string {
 	parts := make([]string, len(xs))
 	for i, x := range xs {
@@ -98,15 +89,8 @@ func (a *App) setDefaultTagLinks(ctx context.Context, tx pgx.Tx, channelID int64
 }
 
 func (a *App) handleListChannels(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
-	q := `SELECT ` + channelCols + ` FROM source_channels`
-	var args []any
-	if a.scoped(tid) {
-		q += ` WHERE tenant_id=$1`
-		args = append(args, *tid)
-	}
-	q += ` ORDER BY title`
-	rows, err := a.db.Query(r.Context(), q, args...)
+	q := `SELECT ` + channelCols + ` FROM source_channels ORDER BY title`
+	rows, err := a.db.Query(r.Context(), q)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
@@ -183,13 +167,13 @@ func (a *App) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 			telegram_channel_id, title, username, ingestion_enabled, policy, default_tag_ids,
 			normalization_template_id, max_media_size_bytes, source_label,
 			ai_enabled, ai_mode, ai_target_language, ai_tone_prompt, ai_custom_system_prompt,
-			watermark_enabled, watermark_text, strip_source_tags, tenant_id)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+			watermark_enabled, watermark_text, strip_source_tags)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		RETURNING `+channelCols,
 		*in.TelegramChannelID, in.Title, in.Username, ingestion, policy, in.DefaultTagIDs,
 		in.NormalizationTemplateID, maxMedia, in.SourceLabel,
 		aiEnabled, aiMode, in.AITargetLanguage, in.AITonePrompt, in.AICustomSystemPrompt,
-		wmEnabled, in.WatermarkText, strip, a.stampTenant(r))
+		wmEnabled, in.WatermarkText, strip)
 	c, err := scanChannel(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -228,13 +212,12 @@ func (a *App) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
-	tid := tenantID(r)
 	c, err := a.loadChannel(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if c == nil || !ownedByClaim(tid, c.TenantID) {
+	if c == nil {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
@@ -318,13 +301,12 @@ func (a *App) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
-	tid := tenantID(r)
 	c, err := a.loadChannel(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if c == nil || !a.tenantOwned(tid, c.TenantID) {
+	if c == nil {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
@@ -356,13 +338,12 @@ func (a *App) handleGetAISettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
-	tid := tenantID(r)
 	c, err := a.loadChannel(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if c == nil || !ownedByClaim(tid, c.TenantID) {
+	if c == nil {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
@@ -375,13 +356,12 @@ func (a *App) handleUpdateAISettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
-	tid := tenantID(r)
 	c, err := a.loadChannel(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if c == nil || !ownedByClaim(tid, c.TenantID) {
+	if c == nil {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
@@ -427,13 +407,12 @@ func (a *App) handleTestAITransform(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}
-	tid := tenantID(r)
 	c, err := a.loadChannel(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if c == nil || !ownedByClaim(tid, c.TenantID) {
+	if c == nil {
 		writeError(w, http.StatusNotFound, "source channel not found")
 		return
 	}

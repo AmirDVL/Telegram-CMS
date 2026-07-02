@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_current_admin, get_tenant_id
+from api.deps import get_current_admin
 from api.schemas import (
     Paginated,
     PostDecision,
@@ -25,13 +25,12 @@ from shared.db import get_session
 from shared.enums import EventAction, PostState
 from shared.models import Admin, Post, PostEvent
 from shared.tasks import enqueue_publish
-from shared.tenant import get_scoped, scope_query
 
 router = APIRouter(prefix="/queue", tags=["queue"], dependencies=[Depends(get_current_admin)])
 
 
-async def _get_post(session: AsyncSession, post_id: int, tenant_id: int | None) -> Post:
-    post = await get_scoped(session, Post, post_id, tenant_id)
+async def _get_post(session: AsyncSession, post_id: int) -> Post:
+    post = await session.get(Post, post_id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
     return post
@@ -54,15 +53,12 @@ async def list_queue(
     limit: int = Query(default=50, le=200),
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Paginated:
     stmt = select(Post)
     count_stmt = select(func.count(Post.id))
     if state:
         stmt = stmt.where(Post.state.in_(state))
         count_stmt = count_stmt.where(Post.state.in_(state))
-    stmt = scope_query(stmt, Post, tenant_id)
-    count_stmt = scope_query(count_stmt, Post, tenant_id)
     total = int((await session.scalar(count_stmt)) or 0)
     result = await session.execute(
         stmt.order_by(Post.received_at.desc()).limit(limit).offset(offset)
@@ -75,9 +71,8 @@ async def list_queue(
 async def get_post(
     post_id: int,
     session: AsyncSession = Depends(get_session),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
-    return await _get_post(session, post_id, tenant_id)
+    return await _get_post(session, post_id)
 
 
 @router.patch("/{post_id}/tags", response_model=PostOut)
@@ -86,9 +81,8 @@ async def edit_tags(
     payload: PostEditTags,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
-    post = await _get_post(session, post_id, tenant_id)
+    post = await _get_post(session, post_id)
     post.tag_ids = list(payload.tag_ids)
     await _event(session, post, EventAction.edited, actor, {"tag_ids": post.tag_ids})
     await session.commit()
@@ -101,9 +95,8 @@ async def _decide(
     decision: PostDecision,
     session: AsyncSession,
     actor: Admin,
-    tenant_id: int | None = None,
 ) -> Post:
-    post = await _get_post(session, post_id, tenant_id)
+    post = await _get_post(session, post_id)
     if decision.tag_ids is not None:
         post.tag_ids = list(decision.tag_ids)
 
@@ -147,9 +140,8 @@ async def decide(
     decision: PostDecision,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
-    return await _decide(post_id, decision, session, actor, tenant_id)
+    return await _decide(post_id, decision, session, actor)
 
 
 @router.post("/{post_id}/approve", response_model=PostOut)
@@ -158,13 +150,12 @@ async def approve(
     payload: PostEditTags | None = None,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(
         action="approve",
         tag_ids=payload.tag_ids if payload else None,
     )
-    return await _decide(post_id, decision, session, actor, tenant_id)
+    return await _decide(post_id, decision, session, actor)
 
 
 @router.post("/{post_id}/schedule", response_model=PostOut)
@@ -173,10 +164,9 @@ async def schedule(
     payload: PostSchedule,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(action="schedule", scheduled_for=payload.scheduled_for)
-    return await _decide(post_id, decision, session, actor, tenant_id)
+    return await _decide(post_id, decision, session, actor)
 
 
 @router.post("/{post_id}/reject", response_model=PostOut)
@@ -184,7 +174,6 @@ async def reject(
     post_id: int,
     session: AsyncSession = Depends(get_session),
     actor: Admin = Depends(get_current_admin),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Post:
     decision = PostDecision(action="reject")
-    return await _decide(post_id, decision, session, actor, tenant_id)
+    return await _decide(post_id, decision, session, actor)

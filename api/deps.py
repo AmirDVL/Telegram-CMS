@@ -1,4 +1,4 @@
-"""FastAPI dependencies: DB session + JWT-based admin + role gating + tenant scope."""
+"""FastAPI dependencies: DB session + JWT-based admin + role gating."""
 
 from __future__ import annotations
 
@@ -19,10 +19,6 @@ CREDENTIALS = HTTPException(
     detail="Could not validate credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
-
-# Store the decoded claims on the request so downstream deps can read tenant_id
-# without decoding the token twice.
-_claims_cache: dict[str, TokenClaims] = {}
 
 
 async def _get_claims(token: str | None = Depends(oauth2_scheme)) -> TokenClaims:
@@ -56,13 +52,3 @@ def require_role(required: Role):
         return admin
 
     return _dep
-
-
-async def get_tenant_id(claims: TokenClaims = Depends(_get_claims)) -> int | None:
-    """Extract the tenant_id from the current JWT.
-
-    Returns ``None`` when multi-tenancy is off or the admin is a platform-level
-    super-admin (no tenant scope). All routers that need tenant scoping inject
-    this dependency.
-    """
-    return claims.tenant_id

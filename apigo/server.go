@@ -67,12 +67,5 @@ func (a *App) router() http.Handler {
 	r.With(a.requireRole(RoleEditor)).Get("/audit", a.handleListEvents)
 	r.With(a.requireRole(RoleEditor)).Get("/audit/post/{postID}", a.handleListPostEvents)
 
-	// Tenants (super-admin; each handler also enforces MULTI_TENANCY_ENABLED).
-	r.With(a.requireRole(RoleSuperAdmin)).Get("/tenants", a.handleListTenants)
-	r.With(a.requireRole(RoleSuperAdmin)).Get("/tenants/{tenantID}", a.handleGetTenant)
-	r.With(a.requireRole(RoleSuperAdmin)).Post("/tenants", a.handleCreateTenant)
-	r.With(a.requireRole(RoleSuperAdmin)).Patch("/tenants/{tenantID}", a.handleUpdateTenant)
-	r.With(a.requireRole(RoleSuperAdmin)).Delete("/tenants/{tenantID}", a.handleDeleteTenant)
-
 	return r
 }

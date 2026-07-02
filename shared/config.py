@@ -65,9 +65,6 @@ class Settings(BaseSettings):
     worker_health_port: int = 8083
     userbot_health_port: int = 8084
 
-    # ── Feature flags ────────────────────────────────────────────────────
-    multi_tenancy_enabled: bool = False
-
     # ── AI Transformation ────────────────────────────────────────────────
     ai_enabled: bool = False
     ai_provider_url: str = "https://api.openai.com/v1"

@@ -28,7 +28,6 @@ export interface Admin {
   username: string;
   role: Role;
   tg_user_id: number | null;
-  tenant_id: number | null;
   created_at: string;
   disabled_at: string | null;
 }
@@ -122,35 +121,6 @@ export interface TokenOut {
   access_token: string;
   refresh_token: string;
   token_type: string;
-}
-
-export interface Tenant {
-  id: number;
-  slug: string;
-  name: string;
-  bot_token: string | null;
-  destination_channel_id: number | null;
-  editor_group_id: number | null;
-  ai_enabled: boolean;
-  ai_mode: AIMode;
-  ai_target_language: string | null;
-  ai_tone_prompt: string | null;
-  ai_custom_system_prompt: string | null;
-  watermark_enabled: boolean;
-  watermark_text: string | null;
-  strip_source_tags: boolean;
-  ai_model: string | null;
-  ai_max_tokens: number | null;
-  ai_timeout_seconds: number | null;
-  dedupe_lookback_days: number | null;
-  publish_spacing_seconds: number | null;
-  media_max_size_bytes: number | null;
-  created_at: string;
-  disabled_at: string | null;
-}
-
-export interface Meta {
-  multi_tenancy_enabled: boolean;
 }
 
 export interface AITestRequest {

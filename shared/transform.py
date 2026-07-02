@@ -1,6 +1,6 @@
 """AI transformation layer: translate / summarize / re-tone / custom prompt.
 
-Toggle-controlled: only runs when ``ai_enabled=True`` on the channel (or tenant)
+Toggle-controlled: only runs when ``ai_enabled=True`` on the channel
 AND the global ``AI_ENABLED`` setting is ``True``.
 
 Uses the **OpenAI-compatible** chat-completions API, which works with OpenAI,
@@ -97,8 +97,7 @@ async def transform_text(
     """Transform text using the configured LLM (OpenAI-compatible API).
 
     ``model``, ``max_tokens``, and ``timeout`` override the global settings when
-    provided (used for per-tenant config overrides via ``shared.tenant.effective``).
-    Pass ``None`` to fall back to the global ``Settings`` values.
+    provided.  Pass ``None`` to fall back to the global ``Settings`` values.
 
     Raises ``AITransformError`` on any failure — the caller decides whether to
     fall back to the un-transformed text.

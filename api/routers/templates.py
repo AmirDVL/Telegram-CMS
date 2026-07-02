@@ -6,12 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_tenant_id, require_role
+from api.deps import require_role
 from api.schemas import TemplateCreate, TemplateOut, TemplateUpdate
 from shared.db import get_session
 from shared.enums import Role
 from shared.models import Admin, Template
-from shared.tenant import get_scoped, scope_query, stamp_tenant
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -20,9 +19,8 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 async def list_templates(
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.editor)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> list[Template]:
-    stmt = scope_query(select(Template).order_by(Template.name), Template, tenant_id)
+    stmt = select(Template).order_by(Template.name)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -32,10 +30,8 @@ async def create_template(
     payload: TemplateCreate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Template:
     tpl = Template(name=payload.name, body=payload.body)
-    stamp_tenant(tpl, tenant_id)
     session.add(tpl)
     await session.commit()
     await session.refresh(tpl)
@@ -48,9 +44,8 @@ async def update_template(
     payload: TemplateUpdate,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> Template:
-    tpl = await get_scoped(session, Template, template_id, tenant_id)
+    tpl = await session.get(Template, template_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="template not found")
     if payload.name is not None:
@@ -67,9 +62,8 @@ async def delete_template(
     template_id: int,
     session: AsyncSession = Depends(get_session),
     _: Admin = Depends(require_role(Role.admin)),
-    tenant_id: int | None = Depends(get_tenant_id),
 ) -> None:
-    tpl = await get_scoped(session, Template, template_id, tenant_id)
+    tpl = await session.get(Template, template_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="template not found")
     await session.delete(tpl)

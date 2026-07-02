@@ -10,26 +10,11 @@ type ctxKey int
 
 const (
 	ctxAdminKey ctxKey = iota
-	ctxClaimsKey
 )
 
 func adminFromCtx(r *http.Request) *adminRow {
 	a, _ := r.Context().Value(ctxAdminKey).(*adminRow)
 	return a
-}
-
-func claimsFromCtx(r *http.Request) *Claims {
-	c, _ := r.Context().Value(ctxClaimsKey).(*Claims)
-	return c
-}
-
-// tenantID returns the effective tenant scope (nil = unscoped / platform admin),
-// mirroring api/deps.get_tenant_id.
-func tenantID(r *http.Request) *int64 {
-	if c := claimsFromCtx(r); c != nil {
-		return c.TenantID
-	}
-	return nil
 }
 
 func bearerToken(r *http.Request) string {
@@ -67,7 +52,7 @@ func (a *App) authenticate(r *http.Request) (*adminRow, *Claims, int) {
 func (a *App) requireRole(min Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			admin, claims, code := a.authenticate(r)
+			admin, _, code := a.authenticate(r)
 			if code != 0 {
 				writeError(w, code, "Could not validate credentials")
 				return
@@ -77,7 +62,6 @@ func (a *App) requireRole(min Role) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), ctxAdminKey, admin)
-			ctx = context.WithValue(ctx, ctxClaimsKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

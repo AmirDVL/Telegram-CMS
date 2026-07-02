@@ -94,8 +94,8 @@ check_all_healthy() {
 # ── Fallback: curl the /healthz endpoints inside the containers ───────────────
 # Used when docker compose ps --format json is unavailable (e.g. older Compose).
 check_via_curl() {
-    # Map of service → internal port. Services without /healthz (caddy, grafana,
-    # prometheus, redis, postgres, botapi) are checked for "running" only via ps.
+    # Map of service → internal port. Services without /healthz (caddy, redis,
+    # postgres, botapi) are checked for "running" only via ps.
     declare -A SVC_PORT=(
         [api]=8000
         [bot]=8082

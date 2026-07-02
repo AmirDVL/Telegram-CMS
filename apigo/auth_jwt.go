@@ -13,10 +13,9 @@ type Claims struct {
 	AdminID   int64
 	Role      Role
 	TokenType string // "access" | "refresh"
-	TenantID  *int64
 }
 
-func (a *App) signToken(adminID int64, username string, role Role, tenantID *int64, tokenType string, ttl time.Duration) (string, error) {
+func (a *App) signToken(adminID int64, username string, role Role, tokenType string, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub":        username,
@@ -26,20 +25,17 @@ func (a *App) signToken(adminID int64, username string, role Role, tenantID *int
 		"iat":        now.Unix(),
 		"exp":        now.Add(ttl).Unix(),
 	}
-	if tenantID != nil {
-		claims["tenant_id"] = *tenantID
-	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString([]byte(a.cfg.JWTSecret))
 }
 
-func (a *App) createAccessToken(adminID int64, username string, role Role, tenantID *int64) (string, error) {
-	return a.signToken(adminID, username, role, tenantID, "access",
+func (a *App) createAccessToken(adminID int64, username string, role Role) (string, error) {
+	return a.signToken(adminID, username, role, "access",
 		time.Duration(a.cfg.AccessTTLMinutes)*time.Minute)
 }
 
-func (a *App) createRefreshToken(adminID int64, username string, role Role, tenantID *int64) (string, error) {
-	return a.signToken(adminID, username, role, tenantID, "refresh",
+func (a *App) createRefreshToken(adminID int64, username string, role Role) (string, error) {
+	return a.signToken(adminID, username, role, "refresh",
 		time.Duration(a.cfg.RefreshTTLDays)*24*time.Hour)
 }
 
@@ -71,12 +67,6 @@ func (a *App) decodeToken(tokenStr string) (*Claims, error) {
 		c.AdminID = int64(v)
 	default:
 		return nil, errors.New("missing admin_id")
-	}
-	if tid, ok := mc["tenant_id"]; ok && tid != nil {
-		if f, ok := tid.(float64); ok {
-			id := int64(f)
-			c.TenantID = &id
-		}
 	}
 	return c, nil
 }

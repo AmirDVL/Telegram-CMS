@@ -12,7 +12,7 @@ import (
 
 func (a *App) loadAdmin(ctx context.Context, id int64) (*adminRow, error) {
 	// Note: unlike getAdminByID this does NOT filter on disabled_at, so disabled
-	// admins are still manageable (mirrors get_scoped(Admin, ...)).
+	// admins are still manageable.
 	row := a.db.QueryRow(ctx, `SELECT `+adminCols+` FROM admins WHERE id=$1`, id)
 	adm, err := scanAdmin(row)
 	if err != nil {
@@ -32,15 +32,8 @@ func (a *App) countActiveSuperAdmins(ctx context.Context) (int64, error) {
 }
 
 func (a *App) handleListAdmins(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
-	q := `SELECT ` + adminCols + ` FROM admins`
-	var args []any
-	if a.scoped(tid) {
-		q += ` WHERE tenant_id=$1`
-		args = append(args, *tid)
-	}
-	q += ` ORDER BY username`
-	rows, err := a.db.Query(r.Context(), q, args...)
+	q := `SELECT ` + adminCols + ` FROM admins ORDER BY username`
+	rows, err := a.db.Query(r.Context(), q)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
@@ -64,7 +57,6 @@ func (a *App) handleCreateAdmin(w http.ResponseWriter, r *http.Request) {
 		Password string  `json:"password"`
 		Role     *string `json:"role"`
 		TgUserID *int64  `json:"tg_user_id"`
-		TenantID *int64  `json:"tenant_id"`
 	}
 	if err := decodeJSON(r, &in); err != nil || len(in.Username) < 3 || len(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, "username (>=3) and password (>=8) are required")
@@ -83,14 +75,10 @@ func (a *App) handleCreateAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "hash error")
 		return
 	}
-	tenantVal := in.TenantID
-	if tenantVal == nil {
-		tenantVal = a.stampTenant(r)
-	}
 	row := a.db.QueryRow(r.Context(),
-		`INSERT INTO admins(username,password_hash,role,tg_user_id,tenant_id)
-		 VALUES($1,$2,$3,$4,$5) RETURNING `+adminCols,
-		in.Username, hash, role, in.TgUserID, tenantVal)
+		`INSERT INTO admins(username,password_hash,role,tg_user_id)
+		 VALUES($1,$2,$3,$4) RETURNING `+adminCols,
+		in.Username, hash, role, in.TgUserID)
 	adm, err := scanAdmin(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -109,13 +97,12 @@ func (a *App) handleUpdateAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "admin not found")
 		return
 	}
-	tid := tenantID(r)
 	adm, err := a.loadAdmin(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if adm == nil || !a.tenantOwned(tid, adm.TenantID) {
+	if adm == nil {
 		writeError(w, http.StatusNotFound, "admin not found")
 		return
 	}

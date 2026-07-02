@@ -14,7 +14,6 @@ var eventActions = map[string]bool{
 }
 
 func (a *App) handleListEvents(w http.ResponseWriter, r *http.Request) {
-	tid := tenantID(r)
 	q := r.URL.Query()
 
 	var where []string
@@ -40,11 +39,6 @@ func (a *App) handleListEvents(w http.ResponseWriter, r *http.Request) {
 		wargs = append(wargs, actions)
 		where = append(where, fmt.Sprintf("action::text = ANY($%d)", len(wargs)))
 	}
-	if a.scoped(tid) {
-		wargs = append(wargs, *tid)
-		where = append(where, fmt.Sprintf("tenant_id=$%d", len(wargs)))
-	}
-
 	limit := 100
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)

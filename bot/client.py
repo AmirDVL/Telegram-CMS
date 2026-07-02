@@ -1,8 +1,4 @@
-"""Shared aiogram Bot instance(s), wired to the local telegram-bot-api server.
-
-In single-tenant mode, a single global bot is used. In multi-tenant mode,
-each tenant can have its own bot_token, so we cache per-tenant Bot instances.
-"""
+"""Shared aiogram Bot instance, wired to the local telegram-bot-api server."""
 
 from __future__ import annotations
 
@@ -38,7 +34,7 @@ def _build_bot(token: str) -> Bot:
 
 
 def get_bot() -> Bot:
-    """Return the global Bot instance (single-tenant or platform default)."""
+    """Return the global Bot instance."""
     global _bot
     if _bot is None:
         s = get_settings()
@@ -46,22 +42,3 @@ def get_bot() -> Bot:
             raise RuntimeError("BOT_TOKEN is required for the bot service")
         _bot = _build_bot(s.bot_token)
     return _bot
-
-
-# Per-tenant bots (keyed by tenant_id). Only used when multi-tenancy is on.
-_tenant_bots: dict[int, Bot] = {}
-
-
-def get_bot_for_tenant(tenant_id: int | None, tenant_bot_token: str | None = None) -> Bot:
-    """Return a Bot for the given tenant.
-
-    Falls back to the global bot if:
-    - ``tenant_id`` is None (multi-tenancy off / platform admin)
-    - ``tenant_bot_token`` is empty (tenant uses the platform bot)
-    """
-    if tenant_id is None or not tenant_bot_token:
-        return get_bot()
-
-    if tenant_id not in _tenant_bots:
-        _tenant_bots[tenant_id] = _build_bot(tenant_bot_token)
-    return _tenant_bots[tenant_id]

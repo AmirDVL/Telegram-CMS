@@ -31,9 +31,9 @@ The installer will:
 2. Optionally configure an HTTP proxy or registry mirrors for the Docker daemon
    (prompted interactively — useful in restricted network environments).
 3. Generate secure random values for `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
-   `JWT_SECRET`, `SEED_ADMIN_PASSWORD`, and `GRAFANA_ADMIN_PASSWORD`.
+   `JWT_SECRET`, and `SEED_ADMIN_PASSWORD`.
 4. Prompt for all required Telegram credentials and the public domain.
-5. Check for host port conflicts on 80, 443, and 3001; offer to remap any that
+5. Check for host port conflicts on 80 and 443; offer to remap any that
    are already in use.
 6. Write `.env` (mode 600) and `docker-compose.override.yml` (Redis auth +
    any remapped ports).
@@ -78,7 +78,7 @@ If you need to set up without the installer:
 cp .env.example .env
 # Edit .env: set TELEGRAM_API_ID/HASH, BOT_TOKEN, DESTINATION_CHANNEL_ID,
 # EDITOR_GROUP_ID, JWT_SECRET, SEED_ADMIN_PASSWORD, APP_DOMAIN,
-# POSTGRES_PASSWORD, REDIS_PASSWORD, GRAFANA_ADMIN_PASSWORD
+# POSTGRES_PASSWORD, REDIS_PASSWORD
 
 # 1. Start infrastructure
 docker compose up -d postgres redis botapi
@@ -297,30 +297,13 @@ the next timer tick will re-attempt the update automatically.
 > rollback, you may need `docker compose run --rm migrate alembic downgrade -1`.
 > See [`docs/FLEET_UPDATES.md`](FLEET_UPDATES.md) for details.
 
-## 10. Monitoring (Prometheus + Grafana)
+## 10. Monitoring
 
-A ready-to-run observability stack ships in `docker-compose.yml`. It needs no
-Python configuration — Prometheus scrapes the API's `/metrics` endpoint
-internally (`api:8000/metrics`, config in `observability/prometheus.yml`).
-
-**Grafana** is published on host port `3001`:
-
-```
-http://<host>:3001        # user: admin  /  password: GRAFANA_ADMIN_PASSWORD (default: admin)
-```
-
-On first boot it is auto-provisioned with:
-
-- a Prometheus datasource (`observability/grafana/provisioning/datasources/`), and
-- an overview dashboard (`observability/grafana/dashboards/tg-cms-overview.json`).
-
-Change the default Grafana password before exposing port `3001` (set
-`GRAFANA_ADMIN_PASSWORD` in `.env` and `docker compose up -d grafana`).
-
-**Prometheus** has no published port; query it inside the network only:
+No Prometheus or Grafana container is bundled. The `api` service still exposes a
+Prometheus-format `/metrics` endpoint (HTTP latency/count + ARQ queue depth) —
+point an external scraper at it if you want dashboards, or read it ad-hoc:
 
 ```bash
-docker compose exec prometheus wget -qO- http://localhost:9090/-/healthy
 # queue depth directly from the API's /metrics:
 docker compose exec api wget -qO- http://localhost:8000/metrics | grep arq_queue_depth
 ```
@@ -331,6 +314,10 @@ Useful signals when triaging the failure cheat-sheet below:
   (worker or bot stuck / down).
 - `api_http_requests_total` / `api_http_request_duration_seconds` — API traffic
   and latency by route.
+
+The userbot's MTProto liveness is reported via `/healthz` and an **editor-group
+alert** (`bot/alerts.py`) on healthy↔unhealthy transitions — this runs in every
+tier, independent of any metrics stack.
 
 ## 11. Open configuration (plan §9 defaults)
 

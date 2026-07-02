@@ -140,25 +140,6 @@ Reverse proxy with automatic TLS. Routes public HTTPS traffic to the `api` and `
 
 ---
 
-### prometheus (Prometheus)
-
-Scrapes the API's `/metrics` endpoint every 15s (config in
-`observability/prometheus.yml`, target `api:8000`). No host port is published —
-it is reachable only inside the Compose network. Stores samples in the
-`promdata` volume.
-
----
-
-### grafana (Grafana)
-
-Visualization layer. Provisioned on boot with a Prometheus datasource
-(`observability/grafana/provisioning/datasources/`) and an overview dashboard
-(`observability/grafana/dashboards/`). Published on host port `3001`; admin
-password is `GRAFANA_ADMIN_PASSWORD` (default `admin`). State persists in the
-`grafanadata` volume.
-
----
-
 ## Data Flow
 
 ```
@@ -336,8 +317,10 @@ Alerting is edge-triggered (one message per transition, not every 30 s).
 
 ### Observability
 
-The API exposes a Prometheus `/metrics` endpoint (`api/metrics.py`) scraped by
-the `prometheus` service. Three metric families are exported:
+The API exposes a Prometheus `/metrics` endpoint (`apigo/metrics.go`; the retained
+Python `api/metrics.py` matches it). No Prometheus/Grafana containers are bundled —
+point an external scraper at the endpoint if you want dashboards. Three metric
+families are exported:
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|

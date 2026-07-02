@@ -23,7 +23,6 @@ from shared.enums import EventAction, MediaType, PostState
 from shared.logging import get_logger
 from shared.models import Post, PostEvent, SourceChannel
 from shared.tasks import enqueue_normalize
-from shared.tenant import stamp_tenant
 
 log = get_logger("userbot.ingest")
 
@@ -117,7 +116,6 @@ async def ingest_message(
             raw_text=text,
             raw_media_refs=[],
         )
-        stamp_tenant(post, channel.tenant_id)
         session.add(post)
         session.add(
             PostEvent(

@@ -12,7 +12,7 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMeta(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"multi_tenancy_enabled": a.cfg.MultiTenancy})
+	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
 // urlInt64 parses a chi path parameter as int64, returning ok=false on failure
