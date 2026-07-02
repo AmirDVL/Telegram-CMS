@@ -104,8 +104,8 @@ docker compose up -d
 3. In the web back-office → **Sources** → add: telegram channel id, title,
    `@username` (if public), policy (`auto` publish / `queue` approve), an
    optional source label and normalization template.
-4. Restart the userbot so it subscribes to the new channel (it backfills up to
-   200 recent posts, idempotently):
+4. The userbot automatically picks up new channels within ~5 minutes (periodic
+   reload). To force an immediate pickup, restart the userbot:
 
    ```bash
    docker compose restart userbot
@@ -184,6 +184,23 @@ Back up the `sessiondata` volume if you do **not** want to re-login the userbot:
 docker run --rm -v tg-cms_sessiondata:/data -v "$PWD":/backup alpine \
   tar czf /backup/session_$(date +%F).tar.gz -C /data .
 ```
+
+### Periodic session backup (recommended)
+
+The userbot's `.session` file contains the MTProto auth key — if the volume is
+lost, an interactive re-login is required. A cron job on the host provides
+low-effort insurance:
+
+```bash
+# /etc/cron.d/tg-cms-session-backup — daily session file backup
+0 3 * * *  root  docker compose -f /opt/tg-cms/docker-compose.yml \
+  cp userbot:/data/sessions/cms_userbot.session /opt/tg-cms/backup/session.bak \
+  2>/dev/null || true
+```
+
+Create the backup directory once: `mkdir -p /opt/tg-cms/backup && chmod 700 /opt/tg-cms/backup`.
+For off-host redundancy, pipe the file to object storage (`rclone`, `aws s3 cp`)
+in the same cron entry.
 
 ## 7. Failure handling cheat-sheet
 
