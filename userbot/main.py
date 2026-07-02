@@ -16,8 +16,6 @@ from telethon.errors import (
     UserDeactivatedBanError,
 )
 
-_FATAL_ERRORS = (AuthKeyError, SessionRevokedError, UserDeactivatedBanError, PhoneNumberBannedError)
-
 from shared.config import get_settings
 from shared.db import SessionLocal
 from shared.health import start_health_server
@@ -27,6 +25,8 @@ from userbot.client import build_client
 from userbot.ingest import ingest_message, last_ingested_message_id, reconcile_pending
 
 log = get_logger("userbot")
+
+_FATAL_ERRORS = (AuthKeyError, SessionRevokedError, UserDeactivatedBanError, PhoneNumberBannedError)
 
 _BACKFILL_LIMIT = 200
 
@@ -281,7 +281,7 @@ async def run() -> None:
             )
         except Exception:
             pass
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     me = await client.get_me()
     log.info("userbot-connected", account=getattr(me, "username", None) or getattr(me, "id", None))
